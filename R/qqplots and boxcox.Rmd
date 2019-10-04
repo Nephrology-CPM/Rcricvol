@@ -1,0 +1,75 @@
+---
+title: "QQ Plots and Boc-Cox Transformations"
+output: word_document
+---
+
+# Box-Cox Transformations and QQ plots
+```{r echo = FALSE, results = 'asis'}
+library(car)
+
+cric <- read.csv("../data/RedCap_v3y0.csv")
+
+summary <- data.frame("init" = c(1:200), "name" = 0, "initial_rsquared" = 0, "transformed_rsquared" = 0, "lambda" = 0)
+summary <- summary[-c(1)]
+line <- 1
+
+lambdas <- c()
+r_squared_afters <- c()
+names_low_rsquared <- c()
+
+for (factor in 1:ncol(cric)) {
+  
+  blanks <- sum(is.na(cric[,factor])) # number of EMPTY entries
+  total <- length(cric[,factor]) # total number of entries
+  
+  if (blanks/total < .2) { # ignore factor if >= 20% of entries are blank
+    if (length(table(cric[,factor])) > 10) {  # factor is continuous
+    
+      my_object <- na.omit(cric[,factor])
+      
+        name <- colnames(cric)[factor]
+        
+        # before transformation
+
+        qq_before <- qqnorm(my_object, ylab=name, main = paste0(name, " before transformation"), plot.it = FALSE)
+        r_before <- cor(qq_before$x,qq_before$y)
+        #qqline(my_object, col="red")
+        
+        bc_result <- boxCox(my_object ~ 1, plotit = F, lambda = seq(-5,5,.1), eps = 0, family = "yjPower")
+        bc_df <- data.frame(bc_result$x, bc_result$y)
+        lambda <- bc_df[with(bc_df, order(-bc_df$bc_result.y)),][1,1]
+        
+        # after transformation
+        if (lambda == 0) {transformed <- log(my_object)}
+        if (lambda != 0) {transformed <- (my_object ^ lambda -1) / lambda}
+          
+        qq_after <- qqnorm(transformed, ylab=name, main = paste0(name, " after transformation"), plot.it = FALSE)
+        r_after <- cor(qq_after$x,qq_after$y)
+        #qqline(my_object, col="red")
+        
+        hist(transformed, main = name)
+        
+        summary$name[line] <- name
+        summary$initial_rsquared[line] <- r_before*r_before
+        summary$transformed_rsquared[line] <- r_after*r_after
+        summary$lambda[line] <- lambda
+        line <- line + 1
+        
+        lambdas <- c(lambdas, lambda)
+        r_squared_afters <- c(r_squared_afters, r_after*r_after)
+        if (r_after*r_after < .9) {names_low_rsquared <- c(names_low_rsquared, name)}
+        
+    }
+  }
+}
+
+
+```
+
+
+# lambda and r squared values
+```{r echo = FALSE, results = 'asis'}
+library(knitr)
+summary <- summary[summary$name != 0,]
+kable(summary)
+```
