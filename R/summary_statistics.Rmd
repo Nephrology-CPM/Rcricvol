@@ -1,0 +1,49 @@
+---
+title: "Summary Statistics"
+output: word_document
+---
+# Categorical Variables
+```{r echo = FALSE, results = 'asis'}
+library(knitr)
+
+cric <- read.csv("../data/RedCap_v3y0.csv")
+
+cont_df <- data.frame(matrix(nrow = nrow(cric), ncol= 4, 0))
+colnames(cont_df) <- c("name", "n", "mean", "std")
+i <- 1
+
+for (factor in 1:ncol(cric)) {
+  
+
+  blanks <- sum(is.na(cric[,factor])) # number of EMPTY entries
+  if (blanks == 0) blanks <-  nrow(cric[cric[,factor] == "",])
+  total <- length(cric[,factor]) # total number of entries
+  
+  if (blanks/total < .2) { # ignore factor if >= 20% of entries are blank
+    if (length(table(cric[,factor])) > 10) {  # factor is continuous
+      cont_df$name[i] <- colnames(cric)[factor]
+      cont_df$n[i] <- total - blanks
+      cont_df$mean[i] <- mean(cric[,factor], na.rm = TRUE)
+      cont_df$std[i] <- sd(cric[,factor], na.rm = TRUE)
+      i <- i + 1
+    } else { # factor is categorical
+      cat_summary <- as.data.frame(table(cric[,factor], useNA = "always"))
+      cat_summary$Percentage <- (cat_summary$Freq*100)/total
+      print(kable(cat_summary, caption = colnames(cric)[factor]))
+    }
+  }
+}
+
+cont_df <- cont_df[cont_df$name != 0,]
+
+```
+
+# Continuous Variables
+```{r echo = FALSE, results = 'asis'}
+kable(cont_df)
+```
+
+
+
+
+
