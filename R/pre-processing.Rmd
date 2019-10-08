@@ -1,0 +1,268 @@
+---
+title: "Pre - Processing"
+output: word_document
+---
+
+upload clinical data
+```{r}
+rawdata <- read.csv("../data/RedCap.csv")
+```
+subset initial visit only
+```{r}
+df_init <- rawdata[,grepl("v3y0", colnames(rawdata))]
+
+```
+
+filter patients based on inclusion criteria in subsetted data and whole data
+```{r}
+# drop patients who have had an amputation
+df_init <- df_init[-grep(1, df_init$amputation_v3y0),]
+rawdata <- rawdata[-grep(1, rawdata$amputation_v3y0),]
+
+
+# drop patients who did not give genetic consent
+df_init <- df_init[-grep(0, df_init$genetic_consent_bl_v3y0),]
+rawdata <- rawdata[-grep(0, rawdata$genetic_consent_bl_v3y0),]
+
+# drop patients using SERMS
+df_init <- df_init[-grep(1, df_init$serms_v3y0),]
+rawdata <- rawdata[-grep(1, rawdata$serms_v3y0),]
+
+```
+
+drop features that are not useful in initial data set and in raw data
+inclusion criteria: no amputations, genetic consent given, not taking SERMS
+```{r}
+ignore <- c()
+# drop features that contain > 20% NA or missing values in the initial data set and record which features they are
+
+for (factor in 1:ncol(df_init)) {
+  blanks <- sum(is.na(df_init[,factor])) # number of NA entries
+  if (blanks == 0) blanks <-  nrow(df_init[df_init[,factor] == "",]) # number of blank entries
+  total <- length(df_init[,factor]) # total number of entries
+  if (blanks/total >= .2) { ignore <- c(ignore, factor) } # ignore factor if >= 20% of entries are blank
+}
+
+# drop calculated features
+# fram
+ignore <- c(ignore, grep("fram", names(df_init)))
+
+# survival analysis
+ignore <- c(ignore, grep("sa_", names(df_init)))
+ignore <- c(ignore, grep("time_", names(df_init)))
+ignore <- c(ignore, grep("scr_roche", names(df_init)))
+
+# side by side time
+ignore <- c(ignore, grep("side_by_side", names(df_init)))
+
+# drop screening factors (should be the same across the board now)
+ignore <- c(ignore, grep("amputation", names(df_init)))
+ignore <- c(ignore, grep("genetic_consent", names(df_init)))
+ignore <- c(ignore, grep("serms", names(df_init)))
+
+# drop ions
+ignore <- c(ignore, grep("ion_", names(df_init)))
+
+# drop certain categorical variables based on distribution
+ignore <- c(ignore, grep("albuminuria", names(df_init)))
+ignore <- c(ignore, grep("diabetes", names(df_init)))
+ignore <- c(ignore, grep("roche", names(df_init)))
+ignore <- c(ignore, grep("hibp", names(df_init)))
+ignore <- c(ignore, grep("igfr_baseline", names(df_init)))
+ignore <- c(ignore, grep("egfr", names(df_init)))
+ignore <- c(ignore, grep("esrd", names(df_init)))
+
+
+df_init <- df_init[-ignore]
+
+
+```
+
+summarize remaining features
+```{r}
+library(knitr)
+
+cont_df <- data.frame(matrix(nrow = nrow(df_init), ncol= 4, 0))
+colnames(cont_df) <- c("name", "n", "mean", "std")
+i <- 1
+for (factor in 1:ncol(df_init)) {
+  if (length(table(df_init[,factor])) > 10) {  # factor is continuous
+    cont_df$name[i] <- colnames(df_init)[factor]
+    cont_df$n[i] <- sum(!is.na(df_init[,factor]))
+    cont_df$mean[i] <- mean(df_init[,factor], na.rm = TRUE)
+    cont_df$std[i] <- sd(df_init[,factor], na.rm = TRUE)
+    i <- i + 1
+  } else { # factor is categorical
+    cat_summary <- as.data.frame(table(df_init[,factor], useNA = "always"))
+    cat_summary$Percentage <- (cat_summary$Freq*100)/total
+    print(kable(cat_summary, caption = colnames(df_init)[factor]))
+  }
+}
+cont_df <- cont_df[cont_df$name != 0,]
+print(kable(cont_df, caption = "continuous variable summary"))
+
+```
+
+calculate EGFR rate and variance for each patient
+```{r}
+entry <- c(1:6)
+
+#get number of unique visits on file
+visits<- unique(substring(names(rawdata)[grep(paste("^egfr_cric", "_v", "[0-9]+", "y", "[0-9]+", sep = ""), names(rawdata))],11))
+
+#init average yearly egfr exponential rate and volatility
+Qbar <- rep(0,dim(rawdata)[1])
+Qvar <- Qbar
+
+#init valid visit counter
+count <- Qbar
+
+#get baseline egfr
+Q0 <- rawdata$egfr_cric_v3y0
+#get baseline time
+t0 <- rawdata$days_thisvisit_v3y0
+
+#loop over visits to calculate egfr return for every year
+for (visit in visits[2:length(visits)]){
+  #get current year egfr
+  Qt <- rawdata[,paste("egfr_cric_",visit,sep = "")]
+  #get time this visit
+  t <- rawdata[,paste("days_thisvisit_",visit,sep = "")]
+
+  #calculate egfr return in units of per year
+  #Qdot <- 365*log(Qt/Q0)/(t-t0)
+  #calculate egfr return in units of per visit
+  Qdot <- log(Qt/Q0)
+
+  #print(visit)
+  #print(Qdot)
+  
+  #get the valid visit indecies
+  vidx <- which(!is.na(Qdot))
+  count[vidx] <- count[vidx] + 1 
+  
+  #accumulate first and second moments
+  Qbar[vidx] <- Qbar[vidx]+Qdot[vidx]
+  Qvar[vidx] <- Qvar[vidx]+Qdot[vidx]*Qdot[vidx]
+    
+  #update previous time and egfr
+  Q0 <- Qt
+  t0 <- t
+}
+
+#calculate mean and variance
+Qbar <- Qbar/count
+Qvar <- Qvar/count - Qbar*Qbar
+
+#update rawdata
+rawdata$Qbar <- Qbar
+rawdata$Qvar <- Qvar
+
+QQbar<- quantile(rawdata$Qbar,probs = seq(0,1,.25), na.rm = TRUE)
+QQvar<- quantile(rawdata$Qvar,probs = seq(0,1,.25), na.rm = TRUE)
+
+#init long form data for egfr with baseline visit
+df <- rawdata[1:2]
+df$rgroup <- findInterval(rawdata$Qbar, QQbar)
+df$vgroup <- findInterval(rawdata$Qvar, QQvar)
+df$mu_egfr_rate <- rawdata$Qbar
+df$sigma_egfr_rate <-rawdata$Qvar
+visit <- visits[1]
+df$egfr <- rawdata[,paste("egfr_cric_",visit,sep = "")]
+df$year <- 0
+#loop over visits
+for (i in c(2:length(visits))){
+  df2 <- rawdata[1:2]
+  df2$rgroup <- findInterval(rawdata$Qbar, QQbar)
+  df2$vgroup <- findInterval(rawdata$Qvar, QQvar)
+  df2$mu_egfr_rate <- rawdata$Qbar
+  df2$sigma_egfr_rate <-rawdata$Qvar
+  df2$egfr <- rawdata[,paste("egfr_cric_",visits[i],sep = "")]
+  df2$year <- i
+  df <- rbind(df,df2)
+}
+
+
+
+
+```
+
+impute missing values 
+```{r}
+library(DMwR)
+
+res <- knnImputation(df_init, k = 10, meth = "median", scale = F)
+
+```
+drop all features that we dropped from the first visit in all the other visits
+```{r}
+ig_raw <- c()
+
+for (f in 1:length(names(df_init)[ignore])) {
+  lookfor <- gsub("v3y0", "", names(df_init)[ignore][f])
+  ig_raw <- c(ig_raw, grep(lookfor, names(rawdata)))
+}
+rawdata <- rawdata[-!is.na(ig_raw)]
+```
+
+normalize data with box-cox transformation
+
+```{r}
+library(car)
+
+# if lambda needed to transform data is too high and there is not a significan change in normality, do not transform the data
+summary <- data.frame("init" = c(1:200), "name" = 0, "initial_rsquared" = 0, "transformed_rsquared" = 0, "lambda" = 0, "transformed" = 1, "n_missing" = 0)
+summary <- summary[-c(1)]
+line <- 1
+
+biglambda <- c()
+untransformed <- c()
+for (factor in 2:ncol(res)) {
+  if (length(table(res[,factor])) > 10) {  # factor is continuous
+    my_object <- res[,factor]
+    name <- colnames(res)[factor]
+        
+    # before transformation
+
+    qq_before <- qqnorm(my_object, ylab=name, main = paste0(name, " before transformation"), plot.it = FALSE)
+    r_before <- cor(qq_before$x,qq_before$y)
+
+    bc_result <- boxCox(my_object ~ 1, plotit = F, lambda = seq(-5,5,.1), eps = 0, family = "yjPower")
+    bc_df <- data.frame(bc_result$x, bc_result$y)
+    lambda <- bc_df[with(bc_df, order(-bc_df$bc_result.y)),][1,1]
+        
+    # after transformation
+    if (lambda == 0) {transformed <- log(my_object)}
+    if (lambda != 0) {transformed <- (my_object ^ lambda -1) / lambda}
+          
+    qq_after <- qqnorm(transformed, ylab=name, main = paste0(name, " after transformation"), plot.it = FALSE)
+    r_after <- cor(qq_after$x,qq_after$y, use = "na.or.complete")
+
+    if ((lambda > 1) && ((r_after - r_before)/r_before < .05)) {   # if lambda > 1 but there is no significant shift towards normal, use original data
+      transformed <- my_object
+      summary$transformed[line] <- 0
+      untransformed <- c(untransformed, name)           # note exceptions
+    } else {
+      res[,factor] <- transformed 
+      if (lambda> 1) {biglambda <- c(biglambda, name)} #note big lambdas
+    }
+        
+    summary$name[line] <- name
+    summary$initial_rsquared[line] <- r_before*r_before
+    summary$transformed_rsquared[line] <- r_after*r_after
+    summary$lambda[line] <- lambda
+    summary$n_missing[line] <- nrow(res) - length(transformed)
+    line <- line + 1
+  }
+}
+
+# note these exceptions
+print(untransformed)
+```
+
+output data
+```{r}
+write.csv(res, "../data/preprocessingresults.csv", row.names = FALSE)
+write.csv(df, "../data/egfr_results.csv", row.names = FALSE)
+
+```
