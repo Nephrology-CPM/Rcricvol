@@ -78,6 +78,21 @@ df_init <- df_init[-ignore]
 
 ```
 
+drop patients with > 20% missing
+```{r}
+
+# drop patients with > 20% missing
+drop_pat <- c()
+for (p in 1:nrow(df_init)) {
+  if (sum(is.na(df_init[p,])) / ncol(df_init) > .2) {
+    drop_pat <- c(drop_pat, p)
+  }
+}
+df_init <- df_init[-drop_pat,]
+rawdata <- rawdata[-drop_pat,]
+
+```
+
 summarize remaining features
 ```{r}
 library(knitr)
@@ -205,8 +220,28 @@ for (f in 1:length(names(df_init)[ignore])) {
 rawdata <- rawdata[-!is.na(ig_raw)]
 ```
 
-normalize data with box-cox transformation
+turn all categorical variables into binary variables
+```{r}
+n_factors <- length(res)
+colnames <- colnames(res)
+for (factor in 2:ncol(res)) {                                                       # for each factor
+  if ((length(table(res[,factor])) < 10) && (length(table(res[,factor])) > 2)) {    # if factor is categorical and not already binary
+    new_names <- levels(as.data.frame(table(res[,factor]))$Var1)                    # save category names as new_names
+    for (name in 1:length(new_names)) {                                             # for each of these category names
+      res[,n_factors + 1] <- as.integer(grepl(name,res[,factor]))                   # add a column to res with binary form of the cat
+      colnames <- c(colnames, paste0(colnames[factor], "_", name))                  # update df column names
+      n_factors <- n_factors + 1                                                    # update number of factors in res
+    }
+    res <- res[-factor]                                                             # remove original categorical factor
+    colnames <- colnames[-factor]                                                   # update colnames
+    n_factors <- n_factors - 1                                                      # update number of factors in res
+  }
+}
+colnames(res) <- colnames
 
+```
+
+normalize continuous data with box-cox transformation
 ```{r}
 library(car)
 
@@ -258,6 +293,17 @@ for (factor in 2:ncol(res)) {
 
 # note these exceptions
 print(untransformed)
+```
+
+add egfr vals to result
+```{r}
+egfr_v0 <- df[df$year == 0,]
+res$mu_egfr <- egfr_v0$mu_egfr_rate
+res$sigma_egfr <- egfr_v0$sigma_egfr_rate
+res$r_group <- egfr_v0$rgroup
+res$v_group <- egfr_v0$vgroup
+res$patientID <- rawdata$patientid
+
 ```
 
 output data
