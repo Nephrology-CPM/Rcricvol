@@ -1,0 +1,129 @@
+---
+title: "Partitioning"
+output: word_document
+---
+# Objectives
+* Select features to use as adjustments in model based on their ability to predict EGFR rate
+
+
+import initial factor data and initial egfr data
+```{r, echo = FALSE, results = 'asis'}
+factors <- read.csv("../data/preprocessingresults.csv")
+#egfr <- read.csv("../data/egfr_results.csv")
+#egfr_y0 <- egfr[egfr$year == 0,]
+
+non_imputed_factors <- read.csv("../data/nonimputed_preprocessingresults.csv")
+```
+
+# Continuous Variables: 
+fit a linear model to factors and mu egfr
+```{r, message = FALSE, echo = FALSE, results = 'asis'}
+library(knitr)
+
+linear_model <- function(factors, description) {
+  df_cont <- data.frame("init" = c(1:ncol(factors)), "name" = 0, 
+                        "B" = 0, "p" = 0, "r_squared" = 0)
+  line <- 1
+  for (factor in 1:ncol(factors)) {
+    if (length(table(factors[,factor])) > 10) {  # factor is continuous
+      df_cont$name[line] <- colnames(factors)[factor]
+      #df_cont$mu_correlation[line] <- abs(cor(egfr_y0$mu_egfr_rate, factors[,factor], use = "na.or.complete"))
+      lm.res <- lm(factors$rawdata.mu_egfr ~ factors[,factor])
+      df_cont$B[line] <- lm.res$coefficients[2]
+      df_cont$p[line] <- summary(lm.res)$coefficients[,4][2] 
+      df_cont$r_squared[line] <- summary(lm.res)$r.squared
+      line <- line + 1
+    }
+  }
+  
+  df_cont <- df_cont[df_cont$name != 0,]
+  df_cont <- df_cont[-1]
+  
+  print(kable(df_cont), label = description)
+}
+
+
+linear_model(factors, "data")
+#linear_model(non_imputed_factors, "non imputed factors")
+
+```
+
+
+# Categorical Variables: 
+Use wilcox test on categorical variables
+```{r, message= FALSE, echo = FALSE, results = 'asis'}
+library(knitr)
+df_cat <- data.frame("init" = c(1:ncol(factors)), "name" = 0, "pval" = 0, "n" = 0, "percent" = 0)
+df_cat <- df_cat[-1]
+line <- 1
+
+for (factor in 1:ncol(factors)) {
+  if (length(table(factors[,factor])) == 2) {  #
+    df_cat$name[line] <- colnames(factors)[factor]  
+    one <- factors[factors[,factor] == 1,]$rawdata.mu_egfr
+    not_one <- factors[factors[,factor] != 1,]$rawdata.mu_egfr
+    df_cat$pval[line] <- wilcox.test(one, not_one)$p.value
+    cat_summary <- as.data.frame(table(factors[,factor], useNA = "always"))
+    df_cat$n[line] <- cat_summary[cat_summary$Var1==1,]$Freq[1]
+    df_cat$percent[line] <- df_cat$n[line]/sum(cat_summary$Freq) * 100
+    
+    line <- line + 1
+  }
+}
+    
+df_cat <- df_cat[df_cat$name != 0,]
+
+write.csv(df_cat, "../data/wilcox_categorical_output.csv")
+    
+kable(df_cat)
+```
+
+# Compare Imputed and Non Imputed Data Sets
+use a linear model to predict egfr rate
+```{r, echo = FALSE, message = FALSE, results = 'asis'}
+
+# compare the imputed data with the non imputed data
+
+
+imputed_lm.res <- lm(rawdata.mu_egfr ~ . - rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group, data = factors)
+print(paste0("imputed data r squared: ", summary(imputed_lm.res)$r.squared))
+
+nonimputed_lm.res <- lm(mu_egfr ~ . , data = non_imputed_factors)
+print(paste0("non imputed data r squared: ", summary(nonimputed_lm.res)$r.squared))
+
+print(paste0("using non imputed data requires ", nrow(factors) - nrow(non_imputed_factors), " patients to be dropped due to missing values."))
+
+```
+
+# Random Forest
+```{r}
+library(randomForest)
+library(caTools)
+df_rf <- factors  
+
+for (factor in 1:ncol(df_rf)) {
+  if (length(table(df_rf[,factor])) == 2) {
+    df_rf[,factor] <- as.factor(df_rf[,factor])
+  }
+}
+
+# training and testing random forest example
+#sample = sample.split(df_rf$rawdata.mu_egfr, SplitRatio = .75)
+#train = subset(df_rf[-c(69:71)], sample == TRUE)    # take out sigma_egfr, r_group, v_group, patientID
+#test = subset(df_rf[-c(69:71)], sample == FALSE)    # take out sigma_egfr, r_group, v_group, patientID
+#rf <- randomForest(rawdata.mu_egfr ~ . , data = train)
+#pred = predict(rf, newdata=test[-68])
+#cm = table(test[,68], pred)
+
+rf.test <- randomForest(rawdata.mu_egfr ~ . , data = df_rf)
+rf.test$importance
+
+print(kable(rf.test$importance))
+```
+
+
+
+
+
+
+
