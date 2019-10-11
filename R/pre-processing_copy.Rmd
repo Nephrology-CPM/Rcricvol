@@ -19,16 +19,27 @@ output: word_document
 rawdata <- read.csv("../data/RedCap.csv")
 rawdata <- rawdata[c(2, 12:2271)] # keep patient ID and clinical features
 
-# make sure categorical variables are defined as factors
-for (factor in 1:ncol(rawdata)) {
-  if (length(table(rawdata[,factor])) < 10) {
-    rawdata[,factor] <- as.factor(rawdata[,factor])
-  }
-}
-
 
 # untargeted CRIC metadata
 untarmet <- read.csv("../data/clinical_creatinine_normalized_data/CRIC_clinical_creatinine_normalized_samplemetadata.csv", header=FALSE, stringsAsFactors = FALSE)
+
+```
+
+
+```{r echo = FALSE, results = 'asis'}
+is.continuous <- function(df, f){
+  return(length(table(df[,f])) > 10)
+}
+
+factorize <- function(df){
+  for (factor in 1:ncol(df)) {
+    if (length(table(df[,factor])) == 2) {
+      df[,factor] <- as.factor(df[,factor])
+    }
+  }
+  return(df)
+}
+
 
 ```
 
@@ -189,7 +200,11 @@ df_init <- data.frame(rawdata$patientid) # include patient id information
 df_init <- data.frame(df_init, rawdata[,grepl("v3y0", colnames(rawdata))]) # find all factors from v3y0
 
 
-### egfr data is still in both intiial and raw data frames ###
+# save egfr data
+egfr_data <- data.frame(rawdata$mu_egfr, rawdata$sigma_egfr, rawdata$r_group, rawdata$v_group)
+
+# save patient data
+patients <- rawdata$patientid
 
 ```
 
@@ -262,7 +277,150 @@ print(paste0("Drop ", length(ignore), " features."))
 
 
 ```
+Convert categorical data to binary
+```{r echo = FALSE, message = FALSE, results = 'asis'}
 
+#Turn all categorical variables into binary variables
+cat_to_binary <- function(df) {
+  n_factors <- length(df)
+  colnames <- colnames(df)
+  for (factor in 2:ncol(df)) {                                                       # for each factor
+    if ((length(table(df[,factor])) < 10) && (length(table(df[,factor])) > 2)) {    # if factor is categorical and not already binary
+      new_names <- levels(as.data.frame(table(df[,factor]))$Var1)                    # save category names as new_names
+      for (name in 1:length(new_names)) {                                             # for each of these category names
+        df[,n_factors + 1] <- as.integer(grepl(name,df[,factor]))                   # add a column to df with binary form of the cat
+        colnames <- c(colnames, paste0(colnames[factor], "_", name))                  # update df column names
+        n_factors <- n_factors + 1                                                    # update number of factors in df
+      }
+      df <- df[-factor]                                                             # remove original categorical factor
+      colnames <- colnames[-factor]                                                   # update colnames
+      n_factors <- n_factors - 1                                                      # update number of factors in df
+    }
+  }
+  colnames(df) <- colnames
+  return(df)
+}
+
+df_init <- cat_to_binary(df_init)
+rawdata <- cat_to_binary(rawdata)
+
+```
+
+Random Forest as a validation for factor dropping later. exclude nas
+```{r echo = FALSE, results = 'asis', message = FALSE}
+library(randomForest)
+library(knitr)
+df_rf <- factorize(df_init)
+df_rf <- df_rf[-1]
+df_rf <- data.frame(df_rf, egfr_data$rawdata.mu_egfr)
+
+rf.test <- randomForest(df_rf$egfr_data.rawdata.mu_egfr ~ . , data = df_rf, importance = TRUE, na.action = "na.exclude")
+kable(importance(rf.test, type = 1))
+
+```
+
+
+
+
+
+Drop features that do not predict mu EGFR well 
++ linear model for continuous factors
++ wilcox for categorical
+```{r echo = FALSE, results = 'asis', message = FALSE}
+library(knitr)
+# continuous vars
+df_init <- data.frame(df_init, egfr_data$rawdata.mu_egfr)
+
+
+df_cont <- data.frame("init" = c(1:ncol(df_init)), "name" = 0, 
+                        "B" = 0, "p" = 0, "r_squared" = 0)
+
+not_associated <- c()
+
+line <- 1
+for (factor in 2:ncol(df_init)) {
+  if (is.continuous(df_init, factor)) {  
+    df_cont$name[line] <- colnames(df_init)[factor]
+      
+    lm.res <- lm(df_init$egfr_data.rawdata.mu_egfr ~ df_init[,factor])
+      
+    df_cont$B[line] <- lm.res$coefficients[2]
+    df_cont$p[line] <- summary(lm.res)$coefficients[,4][2] 
+    df_cont$r_squared[line] <- summary(lm.res)$r.squared
+    
+    if (df_cont$p[line] >= 0.05) {not_associated <- c(not_associated, factor)}
+    
+    line <- line + 1
+    
+  }
+}
+  
+df_cont <- df_cont[df_cont$name != 0,]
+df_cont <- df_cont[-1]
+  
+print(kable(df_cont), label = description)
+
+cont_drop <- length(not_associated)
+
+# categorical vars
+df_cat <- data.frame("init" = c(1:ncol(df_init)), "name" = 0, "pval" = 0, "n" = 0, "percent" = 0)
+df_cat <- df_cat[-1]
+line <- 1
+
+for (factor in 2:ncol(df_init)) {
+  if ((length(table(df_init[,factor])) < 10) && (length(table(df_init[,factor])) > 1)) {  #
+    df_cat$name[line] <- colnames(df_init)[factor]  
+    
+    one <- df_init[df_init[,factor] == 1,]$egfr_data.rawdata.mu_egfr
+    not_one <- df_init[df_init[,factor] != 1,]$egfr_data.rawdata.mu_egfr
+    
+    df_cat$pval[line] <- wilcox.test(one, not_one)$p.value
+    cat_summary <- as.data.frame(table(df_init[,factor], useNA = "always"))
+    df_cat$n[line] <- cat_summary[cat_summary$Var1==1,]$Freq[1]
+    df_cat$percent[line] <- df_cat$n[line]/sum(cat_summary$Freq) * 100
+      
+    if(!grepl("sex", names(df_init)[factor])) {if (df_cat$pval[line] >= 0.05) {not_associated <- c(not_associated, factor)}}  # save sex even if not significant
+  
+    
+    line <- line + 1
+    
+  }
+}
+    
+df_cat <- df_cat[df_cat$name != 0,]
+
+kable(df_cat)
+
+cat_drop <- length(not_associated)-cont_drop
+
+# drop some variiables due to redundancy after looking at codes in cric codebook
+
+# drop race cat 1 and race ethnicity because they are  redundant nad does not contain as much info as race_ethnicity_cat2
+not_associated<- c(not_associated, grep("race_cat_1", names(df_init)))
+not_associated<- c(not_associated, grep("race_ethnicity_v3y0", names(df_init)))
+# drop edu cat 2 and edu cat 1 bc redundant
+not_associated<- c(not_associated, grep("edu_cat_2", names(df_init)))
+not_associated<- c(not_associated, grep("edu_cat_1", names(df_init)))
+
+# dropping features that are not related to mu egfr
+
+#drop all features that we dropp from the first visit in all the other visits
+not_assoc_raw <- c()
+
+for (f in 1:length(names(df_init)[not_associated])) {
+  lookfor <- gsub("v3y0", "", names(df_init)[ignore][f])
+  not_assoc_raw <- c(not_assoc_raw, grep(lookfor, names(rawdata)))
+}
+
+not_assoc_raw <- !is.na(unique(not_assoc_raw))
+rawdata <- rawdata[-not_assoc_raw]
+
+df_init <- df_init[-not_associated]
+print(paste0(cont_drop, " continuous features were dropped because they did not predict egfr well enough."))
+print(paste0(cat_drop, " categorical features were dropped because they did not predict egfr well enough."))
+
+
+```
 
 # Summary of remaining features:
 ```{r echo = FALSE, results = 'asis'}
@@ -296,9 +454,8 @@ print(kable(cont_df, caption = "continuous variable summary"))
 ```{r echo = FALSE, results = 'asis', message=FALSE}
 # Impute missing values using k-nearest neighbors
 library(DMwR)
-
-res <- knnImputation(df_init[-1], k = 10, meth = "median", scale = F) # do not use patient id in imputation
-
+df_init <- df_init[-ncol(df_init)] # remove egfr data
+res <- knnImputation(df_init[-1], k = 10, meth = "median", scale = F) # do not use patient id in imputation. use median because there are no NAs in categorical vars, but would want weighavg for those
 
 # save a copy of non imputed data
 non_imputed <- df_init[-1]
@@ -308,45 +465,19 @@ non_imputed <- df_init[-1]
 
 
 ```{r echo = FALSE, results = 'asis'}
-#Turn all categorical variables into binary variables
-cat_to_binary <- function(df) {
-  n_factors <- length(df)
-  colnames <- colnames(df)
-  for (factor in 2:ncol(df)) {                                                       # for each factor
-    if ((length(table(df[,factor])) < 10) && (length(table(df[,factor])) > 2)) {    # if factor is categorical and not already binary
-      new_names <- levels(as.data.frame(table(df[,factor]))$Var1)                    # save category names as new_names
-      for (name in 1:length(new_names)) {                                             # for each of these category names
-        df[,n_factors + 1] <- as.integer(grepl(name,df[,factor]))                   # add a column to df with binary form of the cat
-        colnames <- c(colnames, paste0(colnames[factor], "_", name))                  # update df column names
-        n_factors <- n_factors + 1                                                    # update number of factors in df
-      }
-      df <- df[-factor]                                                             # remove original categorical factor
-      colnames <- colnames[-factor]                                                   # update colnames
-      n_factors <- n_factors - 1                                                      # update number of factors in df
-    }
-  }
-  colnames(df) <- colnames
-  return(df)
-}
-
-res <- cat_to_binary(res)
-non_imputed <- cat_to_binary(non_imputed)
-```
-
-```{r echo = FALSE, results = 'asis'}
 
 # add egfr information to non imputed data set
-non_imputed$mu_egfr <- rawdata$mu_egfr
-non_imputed$sigma_egfr <- rawdata$sigma_egfr
-non_imputed$r_group <- rawdata$r_group
-non_imputed$v_group <- rawdata$v_group
+non_imputed$mu_egfr <- egfr_data$rawdata.mu_egfr
+non_imputed$sigma_egfr <- egfr_data$rawdata.sigma_egfr
+non_imputed$r_group <- egfr_data$rawdata.r_group
+non_imputed$v_group <- egfr_data$rawdata.v_group
 
 # remove all rows with NA
 non_imputed <- non_imputed[complete.cases(non_imputed),]
 
 # extract non_imputed_egfr data and remove for transformation
-non_imputed_egfr_data <- non_imputed[68:71]
-non_imputed <- non_imputed[-c(68:71)]
+non_imputed_egfr_data <- non_imputed[30:33]
+non_imputed <- non_imputed[-c(30:33)]
 
 ```
 
@@ -398,7 +529,7 @@ transform_continuous_data <- function(df, description){
       summary$initial_rsquared[line] <- r_before*r_before
       summary$transformed_rsquared[line] <- r_after*r_after
       summary$lambda[line] <- lambda
-      summary$n_missing[line] <- nrow(df) - length(transformed)
+      summary$n_imputed[line] <- sum(is.na(df_init[,factor]))
       line <- line + 1
     }
   }
@@ -410,6 +541,7 @@ transform_continuous_data <- function(df, description){
   print("The following continuous factors were not transformed because transformation did not significantly shift them towards normality: ")
   print(untransformed)
   
+  return(df)
 }
 ```
 
@@ -417,8 +549,8 @@ transform_continuous_data <- function(df, description){
 ```{r echo = FALSE, results = "asis"}
 # transform the data
 
-transform_continuous_data(res, "imputed data")
-transform_continuous_data(non_imputed, "non imputed data")
+res <- transform_continuous_data(res, "imputed data")
+non_imputed <- transform_continuous_data(non_imputed, "non imputed data")
 
 ```
 
@@ -427,30 +559,53 @@ transform_continuous_data(non_imputed, "non imputed data")
 
 ```{r echo = FALSE, results = 'asis'}
 #add egfr values back to result and to non_imputed data 
-res <- data.frame(res, rawdata$mu_egfr, rawdata$sigma_egfr, rawdata$r_group, rawdata$v_group)
+res <- data.frame(res, egfr_data)
 
 non_imputed <- data.frame(non_imputed, non_imputed_egfr_data)
 
 ```
 
-```{r echo = FALSE, results = 'asis'}
+
+
+```{r}
+test.res <- lm(mu_egfr ~ urine_albumin_v3y0 + urine_creatinine_v3y0, data = non_imputed )
+print(summary(test.res)$r.squared)
+```
+
+
+
+  
+# Compare Imputed and Non Imputed Data Sets
+use a linear model to predict egfr rate
+```{r, echo = FALSE, message = FALSE, results = 'asis'}
+
+imputed_lm.res <- lm(rawdata.mu_egfr ~ . - rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group, data = res)
+print(paste0("imputed data r squared: ", summary(imputed_lm.res)$r.squared))
+
+nonimputed_lm.res <- lm(mu_egfr ~ . -sigma_egfr - v_group - r_group, data = non_imputed)
+print(paste0("non imputed data r squared: ", summary(nonimputed_lm.res)$r.squared))
+
+print(paste0("using non imputed data requires ", nrow(res) - nrow(non_imputed), " patients to be dropped due to missing values."))
+
+```
+
+```{r results='asis', echo = FALSE, message = FALSE}
 # based on clinical features, make list of all patient IDs that were included
 # use included patients to filter untargeted data
 
 # load untargeted cric data
-untar <- read.csv("../data/clinical_creatinine_normalized_data/CRIC_clinical_creatinine_normalized_data.csv", header=FALSE)
-incl_patients <- rawdata$patientid
+#untar <- read.csv("../data/clinical_creatinine_normalized_data/CRIC_clinical_creatinine_normalized_data.csv", header=FALSE)
 
-t_untar <- as.data.frame(t(untar))
+#t_untar <- as.data.frame(t(untar))
 
-t_untar$vid <- vid
-t_untar <- t_untar[t_untar$vid %in% incl_patients,]
-t_untar <- t_untar[-15435]
+#t_untar$vid <- vid
+#t_untar <- t_untar[t_untar$vid %in% patients,]
+#t_untar <- t_untar[-15435]
 
 
 # save untargeted data filtered by patient
-filtered_untar <- as.data.frame(t(t_untar))
-write.csv(filtered_untar, "../data/clinical_creatinine_normalized_data/cric_normalized_data_filteredByPatient.csv", row.names = FALSE)
+#filtered_untar <- as.data.frame(t(t_untar))
+#write.csv(filtered_untar, "../data/clinical_creatinine_normalized_data/cric_normalized_data_filteredByPatient.csv", row.names = FALSE)
 
 ```
 
