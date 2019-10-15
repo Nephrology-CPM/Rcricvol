@@ -40,3 +40,19 @@ vignettes/*.pdf
 
 # Shiny token, see https://shiny.rstudio.com/articles/shinyapps.html
 rsconnect/
+
+#Misc files
+*.docx
+*.png
+*.csv
+partitioning.Rmd
+pre-processing.Rmd
+qqplots-and-boxcox.Rmd
+show_distributions.Rmd
+summarized_partitioned.R
+summary_partitioned_markdown.Rmd
+transform_data_afterNAimputation.Rmd
+transform_data.Rmd
+summary_statistics.Rmd
+qqplots_boxcox.Rmd
+PartitionDatasets_Clin_Untargeted_volitility-v2.Rmd

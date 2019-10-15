@@ -14,7 +14,6 @@ i <- 1
 
 for (factor in 1:ncol(cric)) {
   
-
   blanks <- sum(is.na(cric[,factor])) # number of EMPTY entries
   if (blanks == 0) blanks <-  nrow(cric[cric[,factor] == "",])
   total <- length(cric[,factor]) # total number of entries

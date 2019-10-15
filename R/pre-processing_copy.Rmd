@@ -1,0 +1,638 @@
+---
+title: "Pre - Processing"
+output: word_document
+---
+
+# Objectives
+* Filter data
+  + Screen patients
+  + Drop factors
+* Calculate EGFR rate for each patient
+* Impute missing values
+* Normalize data
+  + Box-Cox transformation for continuous variables
+  + Convert categorical variables into binary
+
+
+```{r echo = FALSE, results = 'asis'}
+# upload raw data; clinical features located on columns 7 - 2271
+rawdata <- read.csv("../data/RedCap.csv")
+rawdata <- rawdata[c(2, 12:2271)] # keep patient ID and clinical features
+
+
+# untargeted CRIC metadata
+untarmet <- read.csv("../data/clinical_creatinine_normalized_data/CRIC_clinical_creatinine_normalized_samplemetadata.csv", header=FALSE, stringsAsFactors = FALSE)
+
+```
+
+
+```{r echo = FALSE, results = 'asis'}
+is.continuous <- function(df, f){
+  return(length(table(df[,f])) > 10)
+}
+
+factorize <- function(df){
+  for (factor in 1:ncol(df)) {
+    if (length(table(df[,factor])) == 2) {
+      df[,factor] <- as.factor(df[,factor])
+    }
+  }
+  return(df)
+}
+
+
+```
+
+```{r echo = FALSE, results = 'asis'}
+# extract patient IDs from untargeted data
+vid <- substr(untarmet$V2,1,7)
+pid <- unique(vid)
+
+# remove patients in rawdata who are not represented in untarmet, and vice versa
+if (any(!pid %in% rawdata$patientid)) {print("there are patients in the metadata that are not in the raw data")}
+
+no_match <- row.names(rawdata[!rawdata$patientid %in% pid,])
+rawdata <- rawdata[-as.integer(no_match),]
+if (any(!rawdata$patientid %in% pid)) {print("there are patients in the raw data that are not in the metadata")}   #test
+
+#subset initial visit only
+df_init <- data.frame(rawdata$patientid) # include patient id information
+df_init <- data.frame(df_init, rawdata[,grepl("v3y0", colnames(rawdata))]) # find all factors from v3y0
+```
+
+# Filter patients based on inclusion criteria
+```{r echo = FALSE, results = 'asis'}
+drop_patients <- c()
+
+# amputation
+amputee_ids <- df_init[grep(1, df_init$amputation_v3y0),]$rawdata.patientid
+
+# genetic consent
+no_consent_ids <- df_init[grep(0, df_init$genetic_consent_bl_v3y0),]$rawdata.patientid
+
+# SERMS
+SERMS_ids <- df_init[grep(1, df_init$serms_v3y0),]$rawdata.patientid
+
+```
+
+EGFR rate informs inclusion criteria; only include patients who have 4+ EGFR readings
+```{r echo = FALSE, results = 'asis'}
+
+# Calculate EGFR rate and variance for each patient
+entry <- c(1:6)
+
+#get number of unique visits on file
+visits<- unique(substring(names(rawdata)[grep(paste("^egfr_cric", "_v", "[0-9]+", "y", "[0-9]+", sep = ""), names(rawdata))],11))
+
+#init average yearly egfr exponential rate and volatility
+Qbar <- rep(0,dim(rawdata)[1])
+Qvar <- Qbar
+
+#init valid visit counter
+count <- Qbar
+
+#get baseline egfr
+Q0 <- rawdata$egfr_cric_v3y0
+#get baseline time
+t0 <- rawdata$days_thisvisit_v3y0
+
+#loop over visits to calculate egfr return for every year
+for (visit in visits[2:length(visits)]){
+  #get current year egfr
+  Qt <- rawdata[,paste("egfr_cric_",visit,sep = "")]
+  #get time this visit
+  t <- rawdata[,paste("days_thisvisit_",visit,sep = "")]
+
+  #calculate egfr return in units of per year
+  #Qdot <- 365*log(Qt/Q0)/(t-t0)
+  #calculate egfr return in units of per visit
+  Qdot <- log(Qt/Q0)
+
+  #print(visit)
+  #print(Qdot)
+  
+  #get the valid visit indecies
+  vidx <- which(!is.na(Qdot))
+  count[vidx] <- count[vidx] + 1 
+  
+  #accumulate first and second moments
+  Qbar[vidx] <- Qbar[vidx]+Qdot[vidx]
+  Qvar[vidx] <- Qvar[vidx]+Qdot[vidx]*Qdot[vidx]
+    
+  #update previous time and egfr
+  Q0 <- Qt
+  t0 <- t
+}
+
+#calculate mean and variance
+Qbar <- Qbar/count
+Qvar <- Qvar/count - Qbar*Qbar
+
+#update rawdata
+rawdata$Qbar <- Qbar
+rawdata$Qvar <- Qvar
+
+QQbar<- quantile(rawdata$Qbar,probs = seq(0,1,.25), na.rm = TRUE)
+QQvar<- quantile(rawdata$Qvar,probs = seq(0,1,.25), na.rm = TRUE)
+
+
+#init long form data for egfr with baseline visit
+df <- rawdata[1:2]
+df$rgroup <- findInterval(rawdata$Qbar, QQbar)
+df$vgroup <- findInterval(rawdata$Qvar, QQvar)
+df$mu_egfr_rate <- rawdata$Qbar
+df$sigma_egfr_rate <-rawdata$Qvar
+visit <- visits[1]
+df$egfr <- rawdata[,paste("egfr_cric_",visit,sep = "")]
+df$year <- 0
+#loop over visits
+for (i in c(2:length(visits))){
+  df2 <- rawdata[1:2]
+  df2$rgroup <- findInterval(rawdata$Qbar, QQbar)
+  df2$vgroup <- findInterval(rawdata$Qvar, QQvar)
+  df2$mu_egfr_rate <- rawdata$Qbar
+  df2$sigma_egfr_rate <-rawdata$Qvar
+  df2$egfr <- rawdata[,paste("egfr_cric_",visits[i],sep = "")]
+  df2$year <- i
+  df <- rbind(df,df2)
+}
+
+# delete df2 
+rm(df2)
+
+# add egfr information to raw data
+egfr_v0 <- df[df$year == 0,]
+rawdata$mu_egfr <- egfr_v0$mu_egfr_rate
+rawdata$sigma_egfr <- egfr_v0$sigma_egfr_rate
+rawdata$r_group <- egfr_v0$rgroup
+rawdata$v_group <- egfr_v0$vgroup
+
+
+# drop patients with less than 4 egfr readings
+egfr_readings <- count + 1
+rawdata$egfr_readings <- egfr_readings
+few_egfr_ids <- rawdata[rawdata$egfr_readings < 4,]$patientid
+
+
+```
+
+```{r echo = FALSE, results = 'asis'}
+
+# drop patients with > 20% missing from initial visit
+missing20_ids <- c()
+for (p in 1:nrow(df_init)) {
+  if (sum(is.na(df_init[p,])) / ncol(df_init) > .2) {
+    missing20_ids <- c(missing20_ids, df_init(p,1))
+  }
+}
+
+
+# drop the patients from the raw data set
+rawdata <- rawdata[!rawdata$patientid %in% amputee_ids,]
+rawdata <- rawdata[!rawdata$patientid %in% few_egfr_ids,]
+rawdata <- rawdata[!rawdata$patientid %in% missing20_ids,]
+rawdata <- rawdata[!rawdata$patientid %in% no_consent_ids,]
+rawdata <- rawdata[!rawdata$patientid %in% SERMS_ids,]
+
+
+# update the initial year
+df_init <- data.frame(rawdata$patientid) # include patient id information
+df_init <- data.frame(df_init, rawdata[,grepl("v3y0", colnames(rawdata))]) # find all factors from v3y0
+
+
+# save egfr data
+egfr_data <- data.frame(rawdata$mu_egfr, rawdata$sigma_egfr, rawdata$r_group, rawdata$v_group)
+
+# save patient data
+patients <- rawdata$patientid
+
+```
+
+
+Drop features that have been calculated such as survival analyses, were used for screening, are missing more than 20% of entries, etc.
+```{r echo = FALSE, results = 'asis'}
+library(knitr)
+#drop features that are not useful in initial data set and in raw data
+ignore <- c()
+
+# drop features that contain > 20% NA or missing values in the initial data set and record which features they are
+for (factor in 1:ncol(df_init)) {
+  blanks <- sum(is.na(df_init[,factor])) # number of NA entries
+  if (blanks == 0) blanks <-  nrow(df_init[df_init[,factor] == "",]) # number of blank entries
+  total <- length(df_init[,factor]) # total number of entries
+  if (blanks/total >= .2) { ignore <- c(ignore, factor) } # ignore factor if >= 20% of entries are blank
+}
+
+# drop calculated features
+# fram
+ignore <- c(ignore, grep("fram", names(df_init)))
+
+# survival analysis
+ignore <- c(ignore, grep("sa_", names(df_init)))
+ignore <- c(ignore, grep("time_", names(df_init)))
+ignore <- c(ignore, grep("scr_roche", names(df_init)))
+
+# side by side time
+ignore <- c(ignore, grep("side_by_side", names(df_init)))
+
+# drop screening factors (should be the same across the board now)
+ignore <- c(ignore, grep("amputation", names(df_init)))
+ignore <- c(ignore, grep("genetic_consent", names(df_init)))
+ignore <- c(ignore, grep("serms", names(df_init)))
+
+# drop ions (if present)
+ignore <- c(ignore, grep("ion_", names(df_init)))
+
+# drop certain categorical variables based on distribution
+ignore <- c(ignore, grep("albuminuria", names(df_init)))
+ignore <- c(ignore, grep("diabetes", names(df_init)))
+ignore <- c(ignore, grep("roche", names(df_init)))
+ignore <- c(ignore, grep("hibp", names(df_init)))
+ignore <- c(ignore, grep("igfr_baseline", names(df_init)))
+ignore <- c(ignore, grep("egfr", names(df_init)))
+ignore <- c(ignore, grep("esrd", names(df_init)))
+
+# drop u 24h proteins because they are measured in urinary_protein
+ignore <- c(ignore, grep("ualbumin", names(df_init)))
+ignore <- c(ignore, grep("ucreatinine", names(df_init)))
+ignore <- c(ignore, grep("uprotein", names(df_init)))
+
+# remove waist because it is highly correlated with BMI; fit to a linear model to drive point home
+lm.res <- lm(waist_v3y0 ~ bmi_v3y0, df_init)
+kable(data.frame("B" = lm.res$coefficients[2], "p" = summary(lm.res)$coefficients[,4][2] , "r squared" = summary(lm.res)$r.squared), label = "linear model: BMI as a function of waist")
+ignore <- c(ignore, grep("waist", names(df_init)))
+
+#drop all features that we dropped from the first visit in all the other visits
+ig_raw <- c()
+
+for (f in 1:length(names(df_init)[ignore])) {
+  lookfor <- gsub("v3y0", "", names(df_init)[ignore][f])
+  ig_raw <- c(ig_raw, grep(lookfor, names(rawdata)))
+}
+
+ig_raw <- unique(ig_raw)
+rawdata <- rawdata[-ig_raw]
+
+
+# drop ignore features from df_init
+df_init <- df_init[-ignore]
+print(paste0("Drop ", length(ignore), " features."))
+
+
+```
+Convert categorical data to binary
+```{r echo = FALSE, message = FALSE, results = 'asis'}
+
+#Turn all categorical variables into binary variables
+cat_to_binary <- function(df) {
+  n_factors <- length(df)
+  colnames <- colnames(df)
+  for (factor in 2:ncol(df)) {                                                       # for each factor
+    if ((length(table(df[,factor])) < 10) && (length(table(df[,factor])) > 2)) {    # if factor is categorical and not already binary
+      new_names <- levels(as.data.frame(table(df[,factor]))$Var1)                    # save category names as new_names
+      for (name in 1:length(new_names)) {                                             # for each of these category names
+        df[,n_factors + 1] <- as.integer(grepl(name,df[,factor]))                   # add a column to df with binary form of the cat
+        colnames <- c(colnames, paste0(colnames[factor], "_", name))                  # update df column names
+        n_factors <- n_factors + 1                                                    # update number of factors in df
+      }
+      df <- df[-factor]                                                             # remove original categorical factor
+      colnames <- colnames[-factor]                                                   # update colnames
+      n_factors <- n_factors - 1                                                      # update number of factors in df
+    }
+  }
+  colnames(df) <- colnames
+  return(df)
+}
+
+df_init <- cat_to_binary(df_init)
+rawdata <- cat_to_binary(rawdata)
+
+```
+
+Random Forest as a validation for factor dropping later, exclude nas
+```{r echo = FALSE, results = 'asis', message = FALSE}
+library(randomForest)
+library(knitr)
+df_rf <- factorize(df_init)
+df_rf <- df_rf[-1]
+df_rf <- data.frame(df_rf, egfr_data$rawdata.mu_egfr)
+
+rf.test <- randomForest(df_rf$egfr_data.rawdata.mu_egfr ~ . , data = df_rf, importance = TRUE, na.action = "na.exclude")
+mse <- as.data.frame(importance(rf.test, type = 1))
+kable(mse)
+
+mse <- data.frame(rownames(mse), mse)
+
+rf_include <-mse[mse$X.IncMSE > 1.9,]$rownames.mse.
+
+```
+
+
+
+
+
+Drop features that do not predict mu EGFR well 
++ linear model for continuous factors
++ wilcox for categorical
+```{r echo = FALSE, results = 'asis', message = FALSE}
+library(knitr)
+# continuous vars
+df_init <- data.frame(df_init, egfr_data$rawdata.mu_egfr)
+
+
+df_cont <- data.frame("init" = c(1:ncol(df_init)), "name" = 0, 
+                        "B" = 0, "p" = 0, "r_squared" = 0)
+
+not_associated <- c()
+
+line <- 1
+for (factor in 2:ncol(df_init)) {
+  if (is.continuous(df_init, factor)) {  
+    df_cont$name[line] <- colnames(df_init)[factor]
+      
+    lm.res <- lm(df_init$egfr_data.rawdata.mu_egfr ~ df_init[,factor])
+      
+    df_cont$B[line] <- lm.res$coefficients[2]
+    df_cont$p[line] <- summary(lm.res)$coefficients[,4][2] 
+    df_cont$r_squared[line] <- summary(lm.res)$r.squared
+    
+    if (!any(grepl(names(df_init)[factor], rf_include))) {# save factors that had an mse > 1.9 fom random forest even if not significant
+      if (df_cont$p[line] >= 0.05) {not_associated <- c(not_associated, factor)}      
+     
+    }
+    line <- line + 1
+  }
+}
+  
+df_cont <- df_cont[df_cont$name != 0,]
+df_cont <- df_cont[-1]
+  
+print(kable(df_cont), label = description)
+
+cont_drop <- length(not_associated)
+
+# categorical vars
+
+df_cat <- data.frame("init" = c(1:ncol(df_init)), "name" = 0, "pval" = 0, "n" = 0, "percent" = 0)
+df_cat <- df_cat[-1]
+line <- 1
+
+for (factor in 2:ncol(df_init)) {
+  if (length(table(df_init[,factor])) == 1) { not_associated <- c(not_associated, factor)} # drop factors wth no variation
+  else if (!is.continuous(df = df_init, f = factor)) {  #
+    df_cat$name[line] <- colnames(df_init)[factor]  
+    
+    one <- df_init[df_init[,factor] == 1,]$egfr_data.rawdata.mu_egfr
+    not_one <- df_init[df_init[,factor] != 1,]$egfr_data.rawdata.mu_egfr
+    
+    df_cat$pval[line] <- wilcox.test(one, not_one)$p.value
+    cat_summary <- as.data.frame(table(df_init[,factor], useNA = "always"))
+    df_cat$n[line] <- cat_summary[cat_summary$Var1==1,]$Freq[1]
+    df_cat$percent[line] <- df_cat$n[line]/sum(cat_summary$Freq) * 100
+      
+    if(!grepl("sex", names(df_init)[factor])) { # save sex
+      if (!any(grepl(names(df_init)[factor], rf_include))) { # save factors that had  an mse > 1.9 from random forest  even if not significant
+        if (df_cat$pval[line] >= 0.05) {not_associated <- c(not_associated, factor)}}
+    }
+    line <- line + 1
+    
+  }
+}
+    
+df_cat <- df_cat[df_cat$name != 0,]
+
+kable(df_cat)
+
+cat_drop <- length(not_associated)-cont_drop
+
+# drop some variiables due to redundancy after looking at codes in cric codebook
+
+# drop race cat 1 and race ethnicity because they are  redundant nad does not contain as much info as race_ethnicity_cat2
+not_associated<- c(not_associated, grep("race_cat_1", names(df_init)))
+not_associated<- c(not_associated, grep("race_ethnicity_v3y0", names(df_init)))
+# drop edu cat 2 and edu cat 1 bc redundant
+not_associated<- c(not_associated, grep("edu_cat_2", names(df_init)))
+not_associated<- c(not_associated, grep("edu_cat_1", names(df_init)))
+
+# dropping features that are not related to mu egfr
+
+#drop all features that we dropp from the first visit in all the other visits
+not_assoc_raw <- c()
+
+for (f in 1:length(names(df_init)[not_associated])) {
+  lookfor <- gsub("v3y0", "", names(df_init)[ignore][f])
+  not_assoc_raw <- c(not_assoc_raw, grep(lookfor, names(rawdata)))
+}
+
+not_assoc_raw <- !is.na(unique(not_assoc_raw))
+rawdata <- rawdata[-not_assoc_raw]
+
+df_init <- df_init[-not_associated]
+print(paste0(cont_drop, " continuous features were dropped because they did not predict egfr well enough and were not found significant by random forest."))
+print(paste0(cat_drop, " categorical features were dropped because they did not predict egfr well enough and were not found significant by random forest."))
+
+
+```
+
+# Summary of remaining features:
+```{r echo = FALSE, results = 'asis'}
+library(knitr)
+
+cont_df <- data.frame(matrix(nrow = 100, ncol= 4, 0))
+colnames(cont_df) <- c("name", "n", "mean", "std")
+i <- 1
+for (factor in 2:ncol(df_init)) {
+  if (length(table(df_init[,factor])) > 10) {  # factor is continuous
+    cont_df$name[i] <- colnames(df_init)[factor]
+    cont_df$n[i] <- sum(!is.na(df_init[,factor]))
+    cont_df$mean[i] <- mean(df_init[,factor], na.rm = TRUE)
+    cont_df$std[i] <- sd(df_init[,factor], na.rm = TRUE)
+    i <- i + 1
+  } else { # factor is categorical
+    cat_summary <- as.data.frame(table(df_init[,factor], useNA = "always"))
+    cat_summary$Percentage <- (cat_summary$Freq*100)/total
+    print(kable(cat_summary, caption = colnames(df_init)[factor]))
+  }
+}
+cont_df <- cont_df[cont_df$name != 0,]
+print(kable(cont_df, caption = "continuous variable summary"))
+
+```
+
+
+
+
+
+```{r echo = FALSE, results = 'asis', message=FALSE}
+# Impute missing values using k-nearest neighbors
+library(DMwR)
+df_init <- df_init[-ncol(df_init)] # remove egfr data
+
+res <- knnImputation(df_init[-1], k = 10, meth = "median", scale = F) # do not use patient id in imputation. use median because there are no NAs in categorical vars, but would want weighavg for those
+
+# save a copy of non imputed data
+non_imputed <- df_init[-1]
+
+```
+
+
+
+```{r echo = FALSE, results = 'asis'}
+
+# add egfr information to non imputed data set
+non_imputed$mu_egfr <- egfr_data$rawdata.mu_egfr
+non_imputed$sigma_egfr <- egfr_data$rawdata.sigma_egfr
+non_imputed$r_group <- egfr_data$rawdata.r_group
+non_imputed$v_group <- egfr_data$rawdata.v_group
+
+# remove all rows with NA
+non_imputed <- non_imputed[complete.cases(non_imputed),]
+
+# extract non_imputed_egfr data and remove for transformation
+non_imputed_egfr_data <- rev(non_imputed)[1:4]
+non_imputed <- non_imputed[- c((length(non_imputed) - 3):length(non_imputed))]
+
+```
+
+
+```{r echo = FALSE, results = 'asis', message = FALSE}
+#Normalize continuous data with box-cox transformation
+transform_continuous_data <- function(df, description){
+
+  library(car)
+  
+  # if lambda needed to transform data is too high and there is not a significant change in normality, do not transform the data
+  summary <- data.frame("init" = c(1:200), "name" = 0, "initial_rsquared" = 0, "transformed_rsquared" = 0, "lambda" = 0, "transformed" = 1)
+  summary <- summary[-c(1)]
+  line <- 1
+  
+  biglambda <- c()
+  untransformed <- c()
+  for (factor in 2:ncol(df)) {
+    if (length(table(df[,factor])) > 10) {  # factor is continuous
+      my_object <- df[,factor]
+      name <- colnames(df)[factor]
+          
+      # before transformation
+  
+      qq_before <- qqnorm(my_object, ylab=name, main = paste0(name, " before transformation"), plot.it = FALSE)
+      r_before <- cor(qq_before$x,qq_before$y)
+  
+      bc_dfult <- boxCox(my_object ~ 1, plotit = F, lambda = seq(-5,5,.1), eps = 0, family = "yjPower")
+      bc_df <- data.frame(bc_dfult$x, bc_dfult$y)
+      lambda <- bc_df[with(bc_df, order(-bc_df$bc_dfult.y)),][1,1]
+          
+      # after transformation
+      if (lambda == 0) {transformed <- log(my_object)}
+      if (lambda != 0) {transformed <- (my_object ^ lambda -1) / lambda}
+            
+      qq_after <- qqnorm(transformed, ylab=name, main = paste0(name, " after transformation"), plot.it = FALSE)
+      r_after <- cor(qq_after$x,qq_after$y, use = "na.or.complete")
+  
+      if ((lambda > 1) && ((r_after - r_before)/r_before < .05)) {   # if lambda > 1 but there is no significant shift towards normal, use original data
+        transformed <- my_object
+        summary$transformed[line] <- 0
+        untransformed <- c(untransformed, name)           # note exceptions
+      } else {
+        df[,factor] <- transformed 
+        if (lambda> 1) {biglambda <- c(biglambda, name)} #note big lambdas
+      }
+          
+      summary$name[line] <- name
+      summary$initial_rsquared[line] <- r_before*r_before
+      summary$transformed_rsquared[line] <- r_after*r_after
+      summary$lambda[line] <- lambda
+      summary$n_imputed[line] <- sum(is.na(df_init[,factor+1]))
+      summary$percent_imputed[line] <- sum(is.na(df_init[,factor+1]))/nrow(df_init)
+      line <- line + 1
+    }
+  }
+  
+  summary <- summary[summary$name != 0,]
+  
+  # note these exceptions
+  print(kable(summary, label = description))
+  print("The following continuous factors were not transformed because transformation did not significantly shift them towards normality: ")
+  print(untransformed)
+  
+  return(df)
+}
+```
+
+
+```{r echo = FALSE, results = "asis"}
+# transform the data
+
+res <- transform_continuous_data(res, "imputed data")
+non_imputed <- transform_continuous_data(non_imputed, "non imputed data")
+
+```
+
+
+
+
+```{r echo = FALSE, results = 'asis'}
+#add egfr values back to result and to non_imputed data 
+res <- data.frame(res, egfr_data)
+
+non_imputed <- data.frame(non_imputed, non_imputed_egfr_data)
+
+```
+
+
+
+```{r}
+test.res <- lm(mu_egfr ~ urine_albumin_v3y0 + urine_creatinine_v3y0, data = non_imputed )
+print(summary(test.res)$r.squared)
+```
+
+
+
+  
+# Compare Imputed and Non Imputed Data Sets
+use a linear model to predict egfr rate
+```{r, echo = FALSE, message = FALSE, results = 'asis'}
+
+imputed_lm.res <- lm(rawdata.mu_egfr ~ . - rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group, data = res)
+print(paste0("imputed data r squared: ", summary(imputed_lm.res)$r.squared))
+
+nonimputed_lm.res <- lm(mu_egfr ~ . -sigma_egfr - v_group - r_group, data = non_imputed)
+print(paste0("non imputed data r squared: ", summary(nonimputed_lm.res)$r.squared))
+
+print(paste0("using non imputed data requires ", nrow(res) - nrow(non_imputed), " patients to be dropped due to missing values."))
+
+```
+
+```{r results='asis', echo = FALSE, message = FALSE}
+# based on clinical features, make list of all patient IDs that were included
+# use included patients to filter untargeted data
+
+# load untargeted cric data
+untar <- read.csv("../data/clinical_creatinine_normalized_data/CRIC_clinical_creatinine_normalized_data.csv", header=FALSE)
+
+t_untar <- as.data.frame(t(untar))
+
+t_untar$vid <- vid
+t_untar <- t_untar[t_untar$vid %in% patients,]
+t_untar <- t_untar[-15435]
+
+
+# save untargeted data filtered by patient
+filtered_untar <- as.data.frame(t(t_untar))
+write.csv(filtered_untar, "../data/clinical_creatinine_normalized_data/cric_normalized_data_filteredByPatient.csv", row.names = FALSE)
+
+# save untargeted metadata filtered by patient
+filtered_untarmet <- untarmet
+filtered_untarmet$vid <- vid
+filtered_untarmet <- filtered_untarmet[filtered_untarmet$vid %in% patients,]
+filtered_untarmet <- filtered_untarmet[-(length(filtered_untarmet))]
+write.csv(filtered_untarmet, "../data/clinical_creatinine_normalized_data/CRIC_clinical_creatinine_normalized_samplemetadata_filteredByPatient.csv")
+```
+
+
+```{r echo = FALSE, results = 'asis'}
+#save data
+write.csv(data.frame(patients, res), "../data/preprocessingresults.csv", row.names = FALSE)
+write.csv(non_imputed, "../data/nonimputed_preprocessingresults.csv", row.names = FALSE)
+
+```
