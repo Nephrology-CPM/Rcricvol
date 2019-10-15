@@ -1,0 +1,15 @@
+Package: Rcricvol
+Type: Package
+Title: Data Processing Tools in R for cricvol project
+Version: 0.1.0
+Authors@R: person("Daniel", "Montemayor", email = "montemayord2@uthscsa.edu",
+                  role = c("aut", "cre"))
+Maintainer: Daniel Montemayor <montemayord2@uthscsa.edu>
+Author: Daniel Montemayor <montemayord2@uthscsa.edu>
+Description: Tools for uploading CRIC data, generating tables and figures,
+    treating missing values, transformations, and partitioning sub populations.
+Depends: R (>= 3.1.0)
+License: file LICENSE
+LazyData: true
+RoxygenNote: 6.1.1
+Encoding: UTF-8
