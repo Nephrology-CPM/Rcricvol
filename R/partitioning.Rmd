@@ -96,7 +96,7 @@ print(paste0("using non imputed data requires ", nrow(factors) - nrow(non_impute
 ```
 
 # Random Forest
-```{r}
+```{r echo = FALSE, message = FALSE, results = 'asis'}
 library(randomForest)
 library(caTools)
 df_rf <- factors  
@@ -115,8 +115,7 @@ for (factor in 1:ncol(df_rf)) {
 #pred = predict(rf, newdata=test[-68])
 #cm = table(test[,68], pred)
 
-rf.test <- randomForest(rawdata.mu_egfr ~ . , data = df_rf)
-rf.test$importance
+rf.test <- randomForest(rawdata.mu_egfr ~ . -rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group , data = df_rf)
 
 print(kable(rf.test$importance))
 ```
