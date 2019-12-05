@@ -1,0 +1,96 @@
+---
+title: "workflow"
+output: word_document
+---
+
+# load data
+```{r echo = FALSE, message = FALSE}
+# use untargeted, transformed data  
+data <- read.csv("../data/zscore_untargeted_annotatedions.csv")
+
+train <- data[data$group <=2,]
+
+# remove metadata
+pats <- train$patientid
+train <- train[c(grep("V", names(train)))]
+
+ions_inpath <- read.csv("../data/ion_inpath.csv")
+ions_inpath_punct <- read.csv("../data/ion_inpath_punct.csv")
+
+```
+
+```{r}
+# only do these once
+#ann <- read.csv("../data/CRIC_annotation_1mD_neg.csv")
+#pathway_df <- find_ions_in_pathways(ann)
+#binary_pathways(pathway_df = pathway_df, name = "punct")
+
+```
+
+Find example pathways for enrichment analysis
+```{r echo = FALSE, message = FALSE}
+top_pathways <- find_important_pathways(ions_inpath_punct, n = 5)
+```
+
+# PCA dimension reduction
+```{r echo = FALSE, message = FALSE}
+# reduce dimensions to (x,y) coordinates
+pca_coords <- run_PCA(train)
+write.csv(data.frame("patients" = pats, pca_coords), "../data/pca_coords.csv", row.names = FALSE)
+
+# cluster patients
+pca_clusters <- cluster_data(as.data.frame(pca_coords), point_size = 5, h = 2.5)
+
+```
+
+# PCA enrichment analysis
+```{r echo = FALSE, message = FALSE}
+pca_es_summary <- es_summary(pathways = example_pathways, clusters = pca_clusters, inpath_matrix = ions_inpath_punct)
+
+```
+
+
+# TSNE dimension reduction
+```{r echo = FALSE, message = FALSE}
+# reduce dimension to (x,y) coordinates
+#find_optimal_p_tSNE(c(5,10,20,30,40,50), train)
+
+tsne_coords <- run_tSNE(train, 50)
+write.csv(data.frame("patients" = pats, tsne_coords), "../data/tsne_coords.csv", row.names = FALSE)
+
+tsne_clusters <- cluster_data(tsne_coords, point_size = 5, h = 2.5)
+```
+
+
+# TSNE enrichment analysis
+```{r echo = FALSE, message = FALSE}
+tsne_es_summary <- es_summary(pathways = example_pathways, clusters = tsne_clusters, inpath_matrix = ions_inpath_punct)
+
+```
+
+
+# SOM dimension reduction
+```{r echo = FALSE, message = FALSE}
+som_coords <- read.csv("../data/som_trainingset.csv", header = FALSE)
+write.csv(data.frame("patients" = pats, som_coords), "../data/som_coords.csv", row.names = FALSE)
+
+som_clusters <- cluster_data(som_coords, point_size = 5, h = 2.5)
+```
+
+# SOM enrichment analysis
+```{r echo = FALSE, message = FALSE}
+som_es_summary <- es_summary(pathways = top_pathways, clusters = som_clusters, inpath_matrix = ions_inpath_punct)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+

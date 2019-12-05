@@ -1,0 +1,66 @@
+---
+title: "Pre-Process Untargeted Data"
+output: word_document
+---
+
+#Objective: Pre-process all untargeted data (log transformation and z score)
+
+```{r echo = FALSE, message = FALSE}
+# load annotated ions
+original_untar <- as.data.frame(t(read.csv("../data/CRIC_clinical_creatinine_normalized_data.csv")))
+ann <- read.csv("../data/CRIC_annotation_1mD_neg.csv")
+untar <- original_untar[,names(original_untar) %in% paste0("V", ann$ion)]
+
+log_untar <- log(untar)
+
+```
+
+#Screen ions to get to about ~5000. use coefficient of variation (used to make selected zscored ions)
+```{r echo = FALSE, message = FALSE}
+#test <- data.frame(apply(log_original_untar, MARGIN = 2, function(x){sd(x)/mean(x)}))
+#names(test) <- c("cov")
+
+# ions with coefficient of variation greater than 1
+#cutoff <- quantile(test$cov, .66)
+#ions <- log_original_untar[which(test$cov > cutoff)]
+
+```
+
+# Z score ions
+```{r echo = FALSE, message = FALSE}
+
+zscore_untar <- as.data.frame(apply(log_untar, MARGIN = 2, function(x) {
+  (x - mean(x, na.rm = TRUE)) / var(x, na.rm = TRUE)
+}))
+
+```
+
+Add in patient ID and group and visit
+```{r echo = FALSE, message = FALSE}
+untarmet <- read.csv("../data/CRIC_clinical_creatinine_normalized_samplemetadata.csv", header = FALSE)
+partitioning <- read.csv("../data/partitioning.csv")
+names(partitioning)[1] <- "patientid"
+
+zscore_untar$patientid <- substring(untarmet$V2, 1, 7)
+zscore_untar$visit <- substring(untarmet$V2, 9, 15)
+zscore_untar <- merge(zscore_untar, partitioning[c(1,2)], by = "patientid") # combine groupings and patient ids in order
+
+zscore_untar <- zscore_untar[c(1,(length(zscore_untar)-1), length(zscore_untar), 2:(length(zscore_untar)-2))]
+write.csv(zscore_untar, "../data/zscore_untargeted_annotatedions.csv", row.names = FALSE, col.names = colnames(zscore_untar))
+
+```
+
+
+#Example:
+Before:
+```{r echo = FALSE, message = FALSE}
+hist(original_untar[,1])
+```
+After:
+```{r echo = FALSE, message = FALSE}
+hist(zscore_untar[,3])
+```
+
+```{r echo = FALSE, message = FALSE}
+
+```

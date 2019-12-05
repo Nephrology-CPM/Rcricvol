@@ -1,0 +1,67 @@
+---
+title: "dimension reduction"
+output: word_document
+---
+
+packages
+```{r echo = FALSE, message = FALSE}
+
+
+```
+
+# tSNE
+test several options and  choose optimal perplexity
+in: data, perplexities
+out: plots
+```{r echo = FALSE, message = FALSE}
+library(Rtsne)
+library(ggplot2)
+find_optimal_p_tSNE <- function(perplexities, data) {
+  for (p in perplexities) {
+    tsne_out <- Rtsne(as.matrix(train), perplexity = p)
+    plot(tsne_out$Y)
+  }
+}
+
+
+```
+
+in: ion data
+    optimal perplexity
+out: (x,y) coordinates
+```{r echo = FALSE, message = FALSE}
+
+run_tSNE <- function(data, optimal_p) {
+  all_tsne_out <- Rtsne(as.matrix(data), perplexity = optimal_p)
+  tsne_coords <- as.data.frame(all_tsne_out$Y)
+  return(tsne_coords)
+}
+
+
+```
+
+
+# PCA
+in: ion data
+out: (x,y) coordinates
+```{r echo = FALSE, message = FALSE}
+
+run_PCA <- function(data) {
+  res <- prcomp(data)$x
+  return(res[,c(1,2)])
+}
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
