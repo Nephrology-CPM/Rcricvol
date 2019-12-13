@@ -1,0 +1,106 @@
+---
+title: "Retrieve Ion - Pathway Information from HMDB"
+output: word_document
+---
+
+
+# Generate Ion-Pathway information for enrichment analysis
+Before calculating enrichment score: make dataframe of ions and which pathways they are in
+in: annotated ions
+out: writes dataframe of ions and which pathways they are in as pathway_df.csv
+
+```{r echo = FALSE, message = FALSE}
+#library(BiocManager)
+#BiocManager::install("hmdbQuery")
+
+find_ions_in_pathways <- function(ann) {
+  library(hmdbQuery)
+  
+  # load annotated ions
+  ann <- read.csv("../data/CRIC_annotation_1mD_neg.csv")
+  
+  pathway_df <- data.frame("init" = c(1:(nrow(ann)*100)),
+                           "metabolite" = 0, 
+                           "ion" = 0,
+                           "HMDBID" = 0,
+                           "pathway" = 0)
+  pathway_df <- pathway_df[-1]
+  line <- 1
+  
+  metabolites <- c()
+  
+  # for every metabolite in ann (i) 
+  for (i in 1:nrow(ann)) { 
+    met_IDs <- unlist(strsplit(as.character(ann$'ï..id'[i]), '; '))
+    met_IDs <- met_IDs[grepl("HMDB", met_IDs)]
+    met_IDs <- sub("HMDB", "HMDB00", met_IDs)
+    metabolites <- c(metabolites, gsub("[[:punct:]]", "", ann$name[i]))
+    
+    for (id in met_IDs) {
+      
+      entry <- tryCatch(HmdbEntry(prefix = "http://www.hmdb.ca/metabolites/", id = id), error = function(e) entry <- NA)
+      
+      if (!is.na(entry)) {
+        pathways <- store(entry)$biological_properties$pathways
+        
+        if (pathways != "\n    ") {
+          prev_paths <- c()
+          
+          for(path in 1:length(pathways)){
+            if (!gsub(" ", "", unlist(as.character(pathways[path]$pathway$name))) %in% prev_paths){
+              pathway_df$metabolite[line] <- gsub("[[:punct:]]", "", ann$name[i])
+              pathway_df$ion[line] <- ann$ion[i]
+              pathway_df$HMDBID[line] <- id
+              pathway_df$pathway[line] <- gsub(" ", "", unlist(as.character(pathways[path]$pathway$name) ))
+              line <- line + 1
+              prev_paths <- c(prev_paths, gsub(" ", "", unlist(as.character(pathways[path]$pathway$name))))
+            }
+          }
+        }
+      }
+    }
+    print(paste0("met ", i, ": ", as.character(ann$name[i])))
+  }
+  
+  pathway_df <- pathway_df[pathway_df$metabolite != 0,]
+  
+  return(pathway_df)
+  
+  write.csv(pathway_df, "../data/pathway_df.csv", row.names = FALSE)
+}
+
+```
+
+Re format pathway_df as binary matrix
+in: dataframe of ions and which pathways they are in (from prev)
+out: writes binary matrix of ions by pathway as ion_inpath.csv
+```{r echo = FALSE, message = FALSE}
+binary_pathways <- function(pathway_df) {
+  ion_inpath <- as.data.frame(matrix(nrow = length(unique(ann$ion)), ncol = length(unique(pathway_df$pathway)), 0))
+  rownames(ion_inpath) <- unique(ann$ion)
+  colnames(ion_inpath) <- unique(pathway_df$pathway)
+  
+  
+  for (path in 1:ncol(ion_inpath)){
+    ion_inpath[[path]] <- as.numeric(c(rownames(ion_inpath)) %in% unique(pathway_df[pathway_df$pathway == names(ion_inpath)[path],]$ion))
+  }
+  
+  write.csv(ion_inpath, "../data/ion_inpath.csv", row.names = FALSE)
+}
+
+```
+
+# only do these once, takes several hours
+```{r}
+
+ann <- read.csv("../data/CRIC_annotation_1mD_neg.csv")
+pathway_df <- find_ions_in_pathways(ann)
+binary_pathways(pathway_df = pathway_df)
+
+```
+
+
+
+
+
+

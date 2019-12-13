@@ -1,0 +1,243 @@
+---
+title: "Enrichment Analysis"
+output: word_document
+---
+
+Enrichment analysis given clusters
+
+# packages
+```{r echo = FALSE, message = FALSE}
+
+
+```
+
+# functions
+
+enrichment score
+in: x array (unordered)
+    in or out matrix (ions_inpath)
+    pathway of interest
+    plot?
+    cluster description if applicable
+    jumblings (how many times) (default 1000)
+out: ret
+      ret$x_array = ion values (ordered)
+      ret$e_score = e score at that x value
+      ret$Q = enrichment score
+      ret$Q_extreme = maximum possible enrichment score given that all "on" ions are at the beginning of the sequence
+      ret$probability = percent of randomly created enrichment scores which fall below Q
+```{r echo = FALSE, message = FALSE}
+
+escore <- function(data) {
+  sum_in <- sum((data[data$in_path == 1,]$x_array)^2)
+  sum_out <- sum((data[data$in_path == 0,]$x_array)^2)
+  
+  w <- sum_out / sum_in
+  data$e_score = 0
+  amp <- 0
+
+  for (ion in 1:nrow(data)) {
+    if (data$in_path[ion] == 1) {
+      amp <- amp + (w * (data$x_array[ion])^2)
+    } else if (data$in_path[ion] == 0) {
+      amp <- amp - (data$x_array[ion])^2
+    }
+    data$e_score[ion] <- amp
+  }  
+  
+  if (abs(min(data$e_score)) > max(data$e_score)) {es <- min(data$e_score)} else {es <- max(data$e_score)}
+  res <- list("data" = data,
+              "es" = es)
+  return(res)
+}
+
+
+
+calc_ES <- function(x_array, pathway, ions_inpath, plot, cluster_description, jumblings = 1000) {
+  
+  in_path <- ions_inpath[,grep(paste0("^", pathway, "$"), names(ions_inpath))]
+  if (!is.integer(in_path)) {
+    print("pathway not found")
+  } else {
+    data <- data.frame(x_array, in_path)
+    data <- data[order(data$x_array),]
+    
+    copy <- data
+    escore_data <- escore(data)
+    data <- escore_data$data
+    es <- escore_data$es
+    data$x_step <- seq(2:(nrow(data)+1))
+    
+    if (plot == TRUE) {
+      par(mar = c(5,5,2,5))
+      plot(c(1,data$x_step), c(0,data$e_score), type = "l", ylab = "enrichment score", xlab = "index")
+      abline(h = 0)
+      par(new = T)
+      plot(data$x_step, (data$x_array^2), xlab = NA, ylab = NA, axes = F, type = "l", col = "red")
+      axis(side = 4)
+      mtext(side = 4, line = 3, "squared ion means")
+      title(paste0("pathway: ", pathway, " | cluster: ", cluster_description))
+    }
+    
+  
+    # jumble weights 1000 times and store min and max values
+    j_es <- c()
+    
+    for (i in 1:jumblings) {
+      jumbled <- copy
+      jumbled$in_path <- sample(copy$in_path, size = length(copy$in_path), replace = FALSE)
+      escore_jumbled<- escore(jumbled)
+      jumbled <- escore_jumbled$data
+      j_es <- c(j_es, escore_jumbled$es)
+    }
+    
+    extreme <- copy
+    extreme$in_path <- c(rep(1, sum(extreme$in_path)), rep(0, length(extreme$in_path) - sum(extreme$in_path)))
+    extreme_val <- escore(extreme)$es
+    
+    if (es < quantile(j_es, .05)) {pmin = TRUE} else {pmin = FALSE}
+    if (es > quantile(j_es, .95)) {pmax = TRUE} else {pmax = FALSE} 
+    
+    p <- sum(j_es < es)/length(j_es)
+    
+    ret <- list(x_array = data$x_array, 
+                e_score = data$e_score, 
+                Q = es,
+                Q_extreme = extreme_val,
+                probability = p
+                )
+    
+    return(ret)
+  }
+}
+
+
+```
+
+Create enrichment score summary for each method
+in: list of pathways (names) of interest
+    coordinates and clusters (results of cluster_data)
+    metabolite data
+    ions_inpath
+out: summary of pathway, cluster, Q, Q_extreme, # sd away from mean
+```{r echo = FALSE, method = FALSE}
+
+es_summary <- function(pathways, clusters, inpath_matrix, ion_data) {
+  summary <- data.frame(matrix(ncol = 5, nrow = length(pathways)*length(unique(clusters$clusters))))
+  names(summary) <- c("pathway", "cluster", "Q", "Q_extreme", "probability")
+  i <- 1
+  for (p in pathways) {
+    for (c in unique(clusters$clusters)){
+      df <- ion_data[which(clusters$clusters == c),]
+      res <- calc_ES(x_array = colMeans(df), pathway = p, ions_inpath = inpath_matrix, plot = TRUE, cluster_description = c, jumblings = 1000)
+      summary$pathway[i] <- p
+      summary$cluster[i] <- c
+      summary$Q[i] <- res$Q
+      summary$Q_extreme[i] <- res$Q_extreme
+      summary$probability[i] <- res$probability
+      i <- i + 1
+    }
+  }
+  return(summary)
+}
+
+```
+
+Find "important" pathways; those with the most ions in them
+in: binary matrix of ions by pathway (from prev)
+    n pathways to find (default 5)
+out: list  top n pathways
+```{r echo = FALSE, message = FALSE}
+find_important_pathways <- function(ion_inpath, n = 5){
+  pathway_summary <-  data.frame("pathway" = names(ion_inpath), "total_ions" = colSums(ion_inpath))
+  pathway_summary <- pathway_summary[order(pathway_summary$total_ions, decreasing = TRUE),]
+  return(as.character(pathway_summary$pathway[1:n]))
+}
+
+```
+
+
+
+# load data
+
+```{r echo = FALSE, message = FALSE}
+
+ions_inpath <- read.csv("../data/ion_inpath.csv")
+
+pca_train_clusters <- read.csv("../data/pca_train_clusters.csv")
+pca_val_clusters <- read.csv("../data/pca_val_clusters.csv")
+
+tsne_train_clusters <- read.csv("../data/tsne_train_clusters.csv")
+tsne_val_clusters <- read.csv("../data/tsne_val_clusters.csv")
+
+som_train_clusters <- read.csv("../data/som_train_clusters.csv")
+# som val clusters have not been made yet
+# som_val_clusters <- read.csv("../data/som_val_clusters.csv")
+
+untar <- read.csv("../data/zscore_untargeted_annotatedions.csv")
+train <- untar[untar$group <= 2, -c(1:3)]
+val <- untar[untar$group == 3, -c(1:3)] 
+
+```
+
+# Find  pathways for enrichment analysis (top = pathways with most ions in them)
+```{r echo = FALSE, message = FALSE}
+
+top_pathways <- find_important_pathways(ions_inpath, n = 20)
+
+```
+
+# PCA enrichment analysis
+```{r echo = FALSE, message = FALSE}
+
+pca_es_summary <- es_summary(pathways = top_pathways, clusters = pca_train_clusters, inpath_matrix = ions_inpath, ion_data = train)
+write.csv(pca_es_summary, "../data/pca_es_summary.csv", row.names = FALSE)
+
+
+pca_val_es_summary <- es_summary(pathways = top_pathways, clusters = pca_val_clusters, inpath_matrix = ions_inpath, ion_data = val)
+write.csv(pca_val_es_summary, "../data/pca_val_es_summary.csv", row.names = FALSE)
+
+```
+
+
+# TSNE enrichment analysis
+```{r echo = FALSE, message = FALSE}
+
+tsne_es_summary <- es_summary(pathways = top_pathways, clusters = tsne_train_clusters, inpath_matrix = ions_inpath, ion_data = train)
+write.csv(tsne_es_summary, "../data/tsne_es_summary.csv", row.names = FALSE)
+
+tsne_val_es_summary <- es_summary(pathways = top_pathways, clusters = tsne_val_clusters, inpath_matrix = ions_inpath, ion_data = val)
+write.csv(tsne_val_es_summary, "../data/tsne_val_es_summary.csv", row.names = FALSE)
+
+```
+
+# SOM enrichment analysis
+```{r echo = FALSE, message = FALSE}
+
+som_es_summary <- es_summary(pathways = top_pathways, clusters = som_train_clusters, inpath_matrix = ions_inpath, ion_data = train)
+write.csv(som_es_summary, "../data/som_es_summary.csv", row.names = FALSE)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

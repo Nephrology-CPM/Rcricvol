@@ -1,0 +1,45 @@
+---
+title: "Summarize Partitioning Results"
+output: word_document
+---
+
+```{r echo = FALSE, message = FALSE}
+data <- read.csv("../data/partitioning.csv")
+names(data)[1] <- "patientid"
+rawdata <- read.csv("../data/RedCap.csv")
+combined <- merge(data, rawdata, by = "patientid")
+
+```
+
+n patients in each group
+```{r echo = FALSE, message = FALSE}
+table(data$group)
+
+```
+
+female/male ratio
+```{r echo = FALSE, message = FALSE}
+table(combined[combined$sex_v3y0.y == 2,]$group)/table(combined[combined$sex_v3y0.y == 1,]$group)
+print(paste("overall:", mean(table(combined[combined$sex_v3y0.y == 2,]$group)/table(combined[combined$sex_v3y0.y == 1,]$group))))
+
+```
+
+mean age (untransformed)
+```{r echo = FALSE, message = FALSE}
+print(paste("group 0:", mean(combined[combined$group == 0,]$age_integer_v3y0.y)))
+print(paste("group 1:", mean(combined[combined$group == 1,]$age_integer_v3y0.y)))
+print(paste("group 2:", mean(combined[combined$group == 2,]$age_integer_v3y0.y)))
+print(paste("group 3:", mean(combined[combined$group == 3,]$age_integer_v3y0.y)))
+print(paste("group 4:", mean(combined[combined$group == 4,]$age_integer_v3y0.y)))
+
+print(paste("overall:", mean(combined$age_integer_v3y0.y)))
+```
+
+
+
+```{r echo = FALSE, message = FALSE}
+library(randomForest)
+rf <- randomForest(factor(group) ~ . - patientid, data = data)
+print(rf)
+
+```
