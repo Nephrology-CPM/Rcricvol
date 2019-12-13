@@ -1,0 +1,663 @@
+---
+title: "cluster summary"
+output: word_document
+---
+
+Visualize differences between clusters with forest plots and box plots comparing MSEs of predictive models
+
+# packages
+
+```{r echo = FALSE, message = FALSE}
+
+library(ggforestplot)
+library(dplyr)
+library(Rtsne)
+library(ggplot2)
+library(ggpubr)
+library(randomForest)
+library(knitr)
+knitr::opts_chunk$set(fig.width=12, fig.height=8)
+
+```
+
+# functions
+
+```{r echo = FALSE, message = FALSE}
+
+plot_cluster=function(data, var_cluster, point_size) {
+  var_cluster <- factor(var_cluster)
+  ggplot(data, aes_string(x="V1", y="V2", color=var_cluster)) +
+  geom_point(size=point_size) +
+  guides(colour=guide_legend(override.aes=list(size=6))) +
+  xlab("") + ylab("") +
+  ggtitle("") +
+  theme_light(base_size=20) +
+  theme(axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        legend.direction = "horizontal", 
+        legend.position = "bottom",
+        legend.box = "horizontal")
+}
+
+
+plot_forest <- function(forest_data, title, xlab) {
+  forestplot(
+    df = forest_data,
+    estimate = beta,
+    se = se,
+    pvalue = pval,
+    logodds = FALSE,
+    colour = trait,
+    title = title,
+    xlab = xlab,
+  )
+}
+
+``` 
+
+format data to make a forest plot
+in:
+out: input for plot_forest
+```{r echo = FALSE, message = FALSE}
+
+make_forest_data <- function(c_sum, ions, method) {
+  
+  data <- cbind(c_sum, ions)
+    
+  test <- data.frame("cluster" = data[grep(paste0(method, "_cluster"), names(data))], data[grep("V", names(data))])
+  names(test)[1] <- "cluster"
+
+  # need a data frame of name, trait, beta, se, pval
+  my_df_linear <- data.frame("name" = 0, "trait" = 0, "beta" = 0, "se" = 0, "pval" = 0)
+  
+  for (ion in names(test[,grep("V", names(test))])) {
+    for (cluster in unique(test$cluster)) {
+      df <- test
+      df[1] <- as.numeric(df$cluster==cluster)
+      ion_data <- test[,grep(paste0("^", ion, "$"), names(test))]
+      model <- glm(df$cluster ~ ion_data)
+      
+      entry <- data.frame("name" = ion, "trait" = paste0("c", cluster), 
+                          "beta" = coef(summary(model))[2, "Estimate"], 
+                          "se" = coef(summary(model))[2, "Std. Error"], 
+                          "pval" = signif(coef(summary(model)))[2, "Pr(>|t|)"])
+      my_df_linear <- rbind(my_df_linear, entry) 
+      
+    }
+  }
+  
+  return(my_df_linear[my_df_linear$name != 0,])
+  
+}
+
+```
+
+
+```{r echo = FALSE, message = FALSE}
+
+plot_compare_models <- function(linear_clin, linear_other, rf_clin, rf_other, description_other, predicting){
+  
+  combined_data <- data.frame("model" = c(rep("Clin: All Patients", length(linear_clin)),
+                                    rep(paste0("Clin: ", description_other), length(linear_other)),
+                                    rep("Clin and Coords: All Patients", length(rf_clin)),
+                                    rep(paste0("Clin and Coords: ", description_other), length(rf_other))),
+                        "error" = c(linear_clin, linear_other, rf_clin, rf_other)
+  )
+  
+  combined_data$model <- factor(combined_data$model, levels=c("Clin: All Patients", paste0("Clin: ", description_other), "Clin and Coords: All Patients", paste0("Clin and Coords: ", description_other)))
+  compare_means(error~model, data = combined_data)
+  my_comparisons <- list(c("Clin: All Patients", paste0("Clin: ", description_other)), c("Clin and Coords: All Patients", paste0("Clin and Coords: ", description_other)))
+ 
+  ggplot(combined_data, aes(x = model, y = error))+ 
+    geom_boxplot(outlier.shape = NA) +
+    stat_compare_means(comparisons = my_comparisons, method = "t.test", label.y = 0.02, tip.length = 0.001) + 
+    ylim(0, 0.025)+
+    ggtitle(paste0("MSE for predicting ", predicting))
+
+}
+
+```
+
+# load data
+
+```{r echo = FALSE, method = FALSE}
+
+# use untargeted, transformed data  
+data <- read.csv("../data/zscore_untargeted_annotatedions.csv")
+
+train <- data[data$group <=2,]
+pats <- train$patientid
+train <- train[c(grep("V", names(train)))]
+val <- data[data$group == 3,]
+val_pats <- val$patientid
+val <- val[c(grep("V", names(val)))]
+
+
+# clustering data
+cluster_train_sum <- read.csv("../data/clustering_train_summary.csv")
+cluster_train_sum_filtered <- cluster_train_sum[cluster_train_sum$visit == "V3Y0",]
+cluster_train_sum_filtered <- cluster_train_sum_filtered[!duplicated(cluster_train_sum_filtered$patients),]
+cluster_val_sum <- read.csv("../data/clustering_val_summary.csv")
+cluster_val_sum_filtered <- cluster_val_sum[cluster_val_sum$visit == "V3Y0",]
+cluster_val_sum_filtered <- cluster_val_sum_filtered[!duplicated(cluster_val_sum_filtered$patients),]
+
+# clusters
+pca_train_clusters <- read.csv("../data/pca_train_clusters.csv")
+pca_val_clusters <- read.csv("../data/pca_val_clusters.csv")
+tsne_train_clusters <- read.csv("../data/tsne_train_clusters.csv")
+tsne_val_clusters <- read.csv("../data/tsne_val_clusters.csv")
+som_train_clusters <- read.csv("../data/som_train_clusters.csv")
+
+```
+
+
+# try plotting outcomes onto metabolically determined clusters; no trends
+
+PCA
+```{r echo = FALSE, message = FALSE}
+
+rate_on_pca <- merge(pca_train_clusters, cluster_train_sum, by = "patients")
+
+plot_cluster(rate_on_pca[c(2,3)], rate_on_pca$rawdata.r_group, 5)
+plot_cluster(rate_on_pca[c(2,3)], rate_on_pca$rawdata.v_group, 5)
+
+
+```
+
+TSNE
+```{r echo = FALSE, message = FALSE}
+
+rate_on_tsne <- merge(tsne_train_clusters, cluster_train_sum, by = "patients")
+
+plot_cluster(rate_on_tsne[c(2,3)], rate_on_tsne$rawdata.r_group, 5)
+plot_cluster(rate_on_tsne[c(2,3)], rate_on_tsne$rawdata.v_group, 5)
+
+```
+
+SOM
+```{r echo = FALSE, message = FALSE}
+
+rate_on_som <- merge(som_clusters, cluster_sum, by = "patients")
+
+plot_cluster(rate_on_som[c(2,3)], rate_on_som$rawdata.r_group, 5)
+plot_cluster(rate_on_som[c(2,3)], rate_on_som$rawdata.v_group, 5)
+
+```
+
+
+# Forest plot of metabolite associations with clusters for all years
+```{r echo = FALSE, message = FALSE}
+
+forest_pca_train <- make_forest_data(c_sum = cluster_train_sum, ions = train, method = "PCA")
+forest_tsne_train <- make_forest_data(c_sum = cluster_train_sum, ions = train, method = "TSNE")
+forest_som_train <- make_forest_data(c_sum = cluster_train_sum, ions = train, method = "SOM")
+
+plot_forest(forest_data = forest_pca_train, 
+            title = "PCA cluster associations with annotated metabolites", xlab = "1-SD increments in metabolite concentration")
+
+plot_forest(forest_data = forest_tsne_train, 
+            title = "TSNE cluster associations with annotated metabolites", xlab = "1-SD increments in metabolite concentration")
+
+plot_forest(forest_data = forest_som_train, 
+            title = "SOM cluster associations with annotated metabolites", xlab = "1-SD increments in metabolite concentration")
+
+```
+
+# Forest plot of baseline clinical variable associations with groups (will also save summary statistics for each cluster: mean, sd, n)
+```{r echo = FALSE, message = FALSE}
+
+methods <- c("PCA", "TSNE", "SOM")
+
+for (method in methods) {
+  
+  # create data frame of name, trait, beta, se, pval
+  forest <- data.frame("name" = 0, "trait" = 0, "beta" = 0, "se" = 0, "pval" = 0)
+  # create data frame of clin_var, mean, sd, n
+  stats <- data.frame("clin_var" = 0, "cluster" = 0, "mean" = 0, "sd" = 0, "n" = 0)
+  
+  clust_vec <- cluster_train_sum_filtered[grep(paste0(method, "_cluster"), names(cluster_train_sum_filtered))]
+  clusters <- unlist(unique(clust_vec))
+  clinicals <- names(cluster_train_sum_filtered)[grep("v3y0", names(cluster_train_sum_filtered))]
+  
+  for (cluster in clusters) {
+
+    for (clin_var in clinicals) {
+      
+      clin_vec <- unlist(cluster_train_sum_filtered[grep(paste0("^", clin_var, "$"), names(cluster_train_sum_filtered))])
+      
+      model <- glm(as.numeric(clust_vec == cluster) ~ clin_vec)
+      forest_entry <- data.frame("name" = clin_var, "trait" = paste0("c", cluster), 
+                                 "beta" = coef(summary(model))[2, "Estimate"], 
+                                 "se" = coef(summary(model))[2, "Std. Error"], 
+                                 "pval" = signif(coef(summary(model)))[2, "Pr(>|t|)"])
+      stats_entry <- data.frame("clin_var" = clin_var, "cluster" = paste0("c", cluster), "mean" = mean(clin_vec), "sd" = sd(clin_vec), "n" = sum(as.numeric(clust_vec == cluster)))
+      forest <- rbind(forest, forest_entry)
+      stats <- rbind(stats, stats_entry)
+
+    }
+  }
+  
+  # save name, trait, beta, se, pval df
+  write.csv(forest[-1,], paste0("../data/forest_", method, "_train.csv"), row.names = FALSE)
+  # save clin_var, mean, sd, n df
+  write.csv(stats[-1,], paste0("../data/stats_", method, "_train.csv"), row.names = FALSE)
+  
+}
+
+
+pca_forest <- read.csv("../data/forest_PCA_train.csv")
+plot_forest(pca_forest, "PCA Clinical Variable associations", "1-SD increments in clinical variable concentration")
+
+tsne_forest <- read.csv("../data/forest_TSNE_train.csv")
+plot_forest(tsne_forest, "TSNE Clinical Variable associations", "1-SD increments in clinical variable concentration")
+
+som_forest <- read.csv("../data/forest_SOM_train.csv")
+plot_forest(som_forest, "SOM Clinical Variable associations", "1-SD increments in clinical variable concentration")
+```
+
+
+## Predicting EGFR rate using all clinical variables
+# PCA
+```{r echo = FALSE, message = FALSE}
+
+pca_df <- data.frame(cluster_train_sum_filtered[grep("PCA", names(cluster_train_sum_filtered))], 
+                      "egfr_rate" = cluster_train_sum_filtered$rawdata.mu_egfr, 
+                      cluster_train_sum_filtered[grep("v3y0", names(cluster_train_sum_filtered))])
+
+low_pca <- pca_df[pca_df$PCA_cluster %in% c(6),]
+high_pca <- pca_df[pca_df$PCA_cluster %in% c(8),]
+med_pca <- pca_df[!pca_df$PCA_cluster %in% c(6,8),]
+
+pca_val_df <- data.frame(cluster_val_sum_filtered[grep("PCA", names(cluster_val_sum_filtered))], 
+                      "egfr_rate" = cluster_val_sum_filtered$rawdata.mu_egfr, 
+                      cluster_val_sum_filtered[grep("v3y0", names(cluster_val_sum_filtered))])
+
+low_pca_val <- pca_val_df[pca_val_df$PCA_cluster %in% c(6),]
+high_pca_val <- pca_val_df[pca_val_df$PCA_cluster %in% c(8),]
+med_pca_val <- pca_val_df[!pca_val_df$PCA_cluster %in% c(6,8),]
+
+
+
+```
+
+LINEAR
+```{r echo = FALSE, message = FALSE}
+############# ONLY CLIN
+
+# all clin, all pats
+model <- lm(egfr_rate ~ . - PCA_cluster - PCA_X - PCA_Y, data = pca_df)
+lm_pca_clin_all <- (model$fitted.values - pca_df$egfr_rate)^2
+
+# all clin, all pats (VALIDATE)
+val_model <- predict(model, pca_val_df)
+lm_pca_val_clin_all <- (val_model - pca_val_df$egfr_rate)^2
+
+# all clin, low pats
+model <- lm(egfr_rate ~ . - PCA_cluster - PCA_X - PCA_Y, data = low_pca)
+lm_pca_clin_low <- (model$fitted.values - low_pca$egfr_rate)^2
+
+# all clin, med pats
+model <- lm(egfr_rate ~ . - PCA_cluster - PCA_X - PCA_Y, data = med_pca)
+lm_pca_clin_med <- (model$fitted.values - med_pca$egfr_rate)^2
+
+# all clin, high pats
+model <- lm(egfr_rate ~ . - PCA_cluster - PCA_X - PCA_Y, data = high_pca)
+lm_pca_clin_high <- (model$fitted.values - high_pca$egfr_rate)^2
+
+# all clin, high pats (VALIDATE)
+val_model <- predict(model, high_pca_val) 
+lm_pca_val_clin_high <- (val_model - high_pca_val$egfr_rate)^2
+
+############## INCLUDE COORDS
+
+# all clin + coords, all pats
+model <- lm(egfr_rate ~ . - PCA_cluster, data = pca_df)
+lm_pca_coords_all <- (model$fitted.values - pca_df$egfr_rate)^2
+
+# all clin + coords, all pats (VALIDATE)
+val_model <- predict(model, pca_val_df)
+lm_pca_val_coords_all <- (val_model - pca_val_df$egfr_rate)^2
+
+# all clin + coords, low pats
+model <- lm(egfr_rate ~ . - PCA_cluster, data = low_pca)
+lm_pca_coords_low <- (model$fitted.values - low_pca$egfr_rate)^2
+
+# all clin + coords, med pats
+model <- lm(egfr_rate ~ . - PCA_cluster, data = med_pca)
+lm_pca_coords_med <- (model$fitted.values - med_pca$egfr_rate)^2
+
+# all clin + coords, high pats
+model <- lm(egfr_rate ~ . - PCA_cluster, data = high_pca)
+lm_pca_coords_high <- (model$fitted.values - high_pca$egfr_rate)^2
+
+# clin + coords, high pats (VALIDATE)
+val_model <- predict(model, high_pca_val)
+lm_pca_val_coords_high <- (val_model - high_pca_val$egfr_rate)^2
+
+################ PLOT
+
+plot_compare_models(linear_clin = lm_pca_clin_all, linear_other = lm_pca_clin_low, rf_clin = lm_pca_coords_all, rf_other = lm_pca_coords_low, description_other = "LOW group", predicting = paste0("EGFR Rate with Linear Models (LOW PCA group, n = ", length(lm_pca_clin_low), ")"))
+
+plot_compare_models(linear_clin = lm_pca_clin_all, linear_other = lm_pca_clin_med, rf_clin = lm_pca_coords_all, rf_other = lm_pca_coords_med, description_other = "MED group", predicting = paste0("EGFR Rate with Linear Models (MED PCA group, n = ", length(lm_pca_clin_med), ")"))
+
+plot_compare_models(linear_clin = lm_pca_clin_all, linear_other = lm_pca_clin_high, rf_clin = lm_pca_coords_all, rf_other = lm_pca_coords_high, description_other = "HIGH group", predicting = paste0("EGFR Rate with Linear Models (HIGH PCA group, n = ", length(lm_pca_clin_high), ")"))
+
+plot_compare_models(linear_clin = lm_pca_val_clin_all, linear_other = lm_pca_val_clin_high, rf_clin = lm_pca_val_coords_all, rf_other = lm_pca_val_coords_high, description_other = "HIGH group", predicting = paste0("EGFR Rate w/LM using VALIDATION set (HIGH PCA group, n = ", length(lm_pca_val_clin_high), ")"))
+
+
+
+```
+
+RF
+```{r echo = FALSE, message = FALSE}
+# ONLY CLIN
+
+# all clin, all pats
+model <- randomForest(egfr_rate ~ . - PCA_cluster - PCA_X - PCA_Y, data = pca_df)
+rf_pca_clin_all <- (model$predicted - pca_df$egfr_rate)^2
+
+# all clin, low pats
+model <- randomForest(egfr_rate ~ . - PCA_cluster - PCA_X - PCA_Y, data = low_pca)
+rf_pca_clin_low <- (model$predicted - low_pca$egfr_rate)^2
+
+# all clin, med pats
+model <- randomForest(egfr_rate ~ . - PCA_cluster - PCA_X - PCA_Y, data = med_pca)
+rf_pca_clin_med <- (model$predicted - med_pca$egfr_rate)^2
+
+# all clin, high pats
+model <- randomForest(egfr_rate ~ . - PCA_cluster - PCA_X - PCA_Y, data = high_pca)
+rf_pca_clin_high <- (model$predicted - high_pca$egfr_rate)^2
+
+# INCLUDE COORDS
+
+# all clin + coords, all pats
+model <- randomForest(egfr_rate ~ . - PCA_cluster, data = pca_df)
+rf_pca_coords_all <- (model$predicted - pca_df$egfr_rate)^2
+
+# all clin + coords, low pats
+model <- randomForest(egfr_rate ~ . - PCA_cluster, data = low_pca)
+rf_pca_coords_low <- (model$predicted - low_pca$egfr_rate)^2
+
+# all clin + coords, med pats
+model <- randomForest(egfr_rate ~ . - PCA_cluster, data = med_pca)
+rf_pca_coords_med <- (model$predicted - med_pca$egfr_rate)^2
+
+# all clin + coords, high pats
+model <- randomForest(egfr_rate ~ . - PCA_cluster, data = high_pca)
+rf_pca_coords_high <- (model$predicted - high_pca$egfr_rate)^2
+
+# PLOT
+
+plot_compare_models(linear_clin = rf_pca_clin_all, linear_other = rf_pca_clin_low, rf_clin = rf_pca_coords_all, rf_other = rf_pca_coords_low, description_other = "LOW group", predicting = paste0("EGFR Rate with RF Models (LOW PCA group, n = ", length(rf_pca_clin_low), ")"))
+
+plot_compare_models(linear_clin = rf_pca_clin_all, linear_other = rf_pca_clin_med, rf_clin = rf_pca_coords_all, rf_other = rf_pca_coords_med, description_other = "MED group", predicting = paste0("EGFR Rate with RF Models (MED PCA group, n = ", length(rf_pca_clin_med), ")"))
+
+plot_compare_models(linear_clin = rf_pca_clin_all, linear_other = rf_pca_clin_high, rf_clin = rf_pca_coords_all, rf_other = rf_pca_coords_high, description_other = "HIGH group", predicting = paste0("EGFR Rate with RF Models (HIGH PCA group, n = ", length(rf_pca_clin_high), ")"))
+
+```
+
+
+# TSNE
+```{r echo = FALSE, message = FALSE}
+
+tsne_df <- data.frame(cluster_train_sum_filtered[grep("TSNE", names(cluster_train_sum_filtered))], 
+                      "egfr_rate" = cluster_train_sum_filtered$rawdata.mu_egfr, 
+                      cluster_train_sum_filtered[grep("v3y0", names(cluster_train_sum_filtered))])
+
+low_tsne <- tsne_df[tsne_df$TSNE_cluster %in% c(2),]
+high_tsne <- tsne_df[tsne_df$TSNE_cluster %in% c(3),]
+med_tsne <- tsne_df[!tsne_df$TSNE_cluster %in% c(2,3),]
+
+tsne_val_df <- data.frame(cluster_val_sum_filtered[grep("TSNE", names(cluster_val_sum_filtered))], 
+                      "egfr_rate" = cluster_val_sum_filtered$rawdata.mu_egfr, 
+                      cluster_val_sum_filtered[grep("v3y0", names(cluster_val_sum_filtered))])
+
+low_tsne_val <- tsne_val_df[tsne_val_df$TSNE_cluster %in% c(6),]
+high_tsne_val <- tsne_val_df[tsne_val_df$TSNE_cluster %in% c(8),]
+med_tsne_val <- tsne_val_df[!tsne_val_df$TSNE_cluster %in% c(6,8),]
+
+```
+
+LINEAR
+```{r echo = FALSE, message = FALSE}
+# ONLY CLIN
+
+# all clin, all pats
+model <- lm(egfr_rate ~ . - TSNE_cluster - TSNE_X - TSNE_Y, data = tsne_df)
+lm_tsne_clin_all <- (model$fitted.values - tsne_df$egfr_rate)^2
+
+# all clin, all pats (VALIDATE)
+val_model <- predict(model, tsne_val_df)
+lm_tsne_val_clin_all <- (val_model - tsne_val_df$egfr_rate)^2
+
+# all clin, low pats
+model <- lm(egfr_rate ~ . - TSNE_cluster - TSNE_X - TSNE_Y, data = low_tsne)
+lm_tsne_clin_low <- (model$fitted.values - low_tsne$egfr_rate)^2
+
+# all clin, med pats
+model <- lm(egfr_rate ~ . - TSNE_cluster - TSNE_X - TSNE_Y, data = med_tsne)
+lm_tsne_clin_med <- (model$fitted.values - med_tsne$egfr_rate)^2
+
+# all clin, high pats
+model <- lm(egfr_rate ~ . - TSNE_cluster - TSNE_X - TSNE_Y, data = high_tsne)
+lm_tsne_clin_high <- (model$fitted.values - high_tsne$egfr_rate)^2
+
+# all clin, high pats (VALIDATE)
+val_model <- predict(model, high_tsne_val) 
+lm_tsne_val_clin_high <- (val_model - high_tsne_val$egfr_rate)^2
+
+# INCLUDE COORDS
+
+# all clin + coords, all pats
+model <- lm(egfr_rate ~ . - TSNE_cluster, data = tsne_df)
+lm_tsne_coords_all <- (model$fitted.values - tsne_df$egfr_rate)^2
+
+# all clin + coords, all pats (VALIDATE)
+val_model <- predict(model, tsne_val_df)
+lm_tsne_val_coords_all <- (val_model - tsne_val_df$egfr_rate)^2
+
+# all clin + coords, low pats
+model <- lm(egfr_rate ~ . - TSNE_cluster, data = low_tsne)
+lm_tsne_coords_low <- (model$fitted.values - low_tsne$egfr_rate)^2
+
+# all clin + coords, med pats
+model <- lm(egfr_rate ~ . - TSNE_cluster, data = med_tsne)
+lm_tsne_coords_med <- (model$fitted.values - med_tsne$egfr_rate)^2
+
+# all clin + coords, high pats
+model <- lm(egfr_rate ~ . - TSNE_cluster, data = high_tsne)
+lm_tsne_coords_high <- (model$fitted.values - high_tsne$egfr_rate)^2
+
+# clin + coords, high pats (VALIDATE)
+val_model <- predict(model, high_tsne_val)
+lm_tsne_val_coords_high <- (val_model - high_tsne_val$egfr_rate)^2
+
+# PLOT
+
+plot_compare_models(linear_clin = lm_tsne_clin_all, linear_other = lm_tsne_clin_low, rf_clin = lm_tsne_coords_all, rf_other = lm_tsne_coords_low, description_other = "LOW group", predicting = paste0("EGFR Rate with Linear Models (LOW TSNE group, n = ", length(lm_tsne_clin_low), ")"))
+
+plot_compare_models(linear_clin = lm_tsne_clin_all, linear_other = lm_tsne_clin_med, rf_clin = lm_tsne_coords_all, rf_other = lm_tsne_coords_med, description_other = "MED group", predicting = paste0("EGFR Rate with Linear Models (MED TSNE group, n = ", length(lm_tsne_clin_med), ")"))
+
+plot_compare_models(linear_clin = lm_tsne_clin_all, linear_other = lm_tsne_clin_high, rf_clin = lm_tsne_coords_all, rf_other = lm_tsne_coords_high, description_other = "HIGH group", predicting = paste0("EGFR Rate with Linear Models (HIGH TSNE group, n = ", length(lm_tsne_clin_high), ")"))
+
+plot_compare_models(linear_clin = lm_tsne_val_clin_all, linear_other = lm_tsne_val_clin_high, rf_clin = lm_tsne_val_coords_all, rf_other = lm_tsne_val_coords_high, description_other = "HIGH group", predicting = paste0("EGFR Rate w/LM using VALIDATION set (HIGH TSNE group, n = ", length(lm_tsne_val_clin_high), ")"))
+
+```
+
+RF
+```{r echo = FALSE, message = FALSE}
+# ONLY CLIN
+
+# all clin, all pats
+model <- randomForest(egfr_rate ~ . - TSNE_cluster - TSNE_X - TSNE_Y, data = tsne_df)
+rf_tsne_clin_all <- (model$predicted - tsne_df$egfr_rate)^2
+
+# all clin, low pats
+model <- randomForest(egfr_rate ~ . - TSNE_cluster - TSNE_X - TSNE_Y, data = low_tsne)
+rf_tsne_clin_low <- (model$predicted - low_tsne$egfr_rate)^2
+
+# all clin, med pats
+model <- randomForest(egfr_rate ~ . - TSNE_cluster - TSNE_X - TSNE_Y, data = med_tsne)
+rf_tsne_clin_med <- (model$predicted - med_tsne$egfr_rate)^2
+
+# all clin, high pats
+model <- randomForest(egfr_rate ~ . - TSNE_cluster - TSNE_X - TSNE_Y, data = high_tsne)
+rf_tsne_clin_high <- (model$predicted - high_tsne$egfr_rate)^2
+
+# INCLUDE COORDS
+
+# all clin + coords, all pats
+model <- randomForest(egfr_rate ~ . - TSNE_cluster, data = tsne_df)
+rf_tsne_coords_all <- (model$predicted - tsne_df$egfr_rate)^2
+
+# all clin + coords, low pats
+model <- randomForest(egfr_rate ~ . - TSNE_cluster, data = low_tsne)
+rf_tsne_coords_low <- (model$predicted - low_tsne$egfr_rate)^2
+
+# all clin + coords, med pats
+model <- randomForest(egfr_rate ~ . - TSNE_cluster, data = med_tsne)
+rf_tsne_coords_med <- (model$predicted - med_tsne$egfr_rate)^2
+
+# all clin + coords, high pats
+model <- randomForest(egfr_rate ~ . - TSNE_cluster, data = high_tsne)
+rf_tsne_coords_high <- (model$predicted - high_tsne$egfr_rate)^2
+
+# PLOT
+
+plot_compare_models(linear_clin = rf_tsne_clin_all, linear_other = rf_tsne_clin_low, rf_clin = rf_tsne_coords_all, rf_other = rf_tsne_coords_low, description_other = "LOW group", predicting = paste0("EGFR Rate with RF Models (LOW TSNE group, n = ", length(rf_tsne_clin_low), ")"))
+
+plot_compare_models(linear_clin = rf_tsne_clin_all, linear_other = rf_tsne_clin_med, rf_clin = rf_tsne_coords_all, rf_other = rf_tsne_coords_med, description_other = "MED group", predicting = paste0("EGFR Rate with RF Models (MED TSNE group, n = ", length(rf_tsne_clin_med), ")"))
+
+plot_compare_models(linear_clin = rf_tsne_clin_all, linear_other = rf_tsne_clin_high, rf_clin = rf_tsne_coords_all, rf_other = rf_tsne_coords_high, description_other = "HIGH group", predicting = paste0("EGFR Rate with RF Models (HIGH TSNE group, n = ", length(rf_tsne_clin_high), ")"))
+
+```
+
+# SOM
+```{r echo = FALSE, message = FALSE}
+
+som_df <- data.frame(cluster_train_sum_filtered[grep("SOM", names(cluster_train_sum_filtered))], 
+                      "egfr_rate" = cluster_train_sum_filtered$rawdata.mu_egfr, 
+                      cluster_train_sum_filtered[grep("v3y0", names(cluster_train_sum_filtered))])
+
+low_som <- som_df[som_df$SOM_cluster %in% c(5),]
+high_som <- som_df[som_df$SOM_cluster %in% c(1),]
+med_som <- som_df[!som_df$SOM_cluster %in% c(1,5),]
+
+```
+
+LINEAR
+```{r echo = FALSE, message = FALSE}
+# ONLY CLIN
+
+# all clin, all pats
+model <- lm(egfr_rate ~ . - SOM_cluster - SOM_X - SOM_Y, data = som_df)
+lm_som_clin_all <- (model$fitted.values - som_df$egfr_rate)^2
+
+# all clin, low pats
+model <- lm(egfr_rate ~ . - SOM_cluster - SOM_X - SOM_Y, data = low_som)
+lm_som_clin_low <- (model$fitted.values - low_som$egfr_rate)^2
+
+# all clin, med pats
+model <- lm(egfr_rate ~ . - SOM_cluster - SOM_X - SOM_Y, data = med_som)
+lm_som_clin_med <- (model$fitted.values - med_som$egfr_rate)^2
+
+# all clin, high pats
+model <- lm(egfr_rate ~ . - SOM_cluster - SOM_X - SOM_Y, data = high_som)
+lm_som_clin_high <- (model$fitted.values - high_som$egfr_rate)^2
+
+# INCLUDE COORDS
+
+# all clin + coords, all pats
+model <- lm(egfr_rate ~ . - SOM_cluster, data = som_df)
+lm_som_coords_all <- (model$fitted.values - som_df$egfr_rate)^2
+
+# all clin + coords, low pats
+model <- lm(egfr_rate ~ . - SOM_cluster, data = low_som)
+lm_som_coords_low <- (model$fitted.values - low_som$egfr_rate)^2
+
+# all clin + coords, med pats
+model <- lm(egfr_rate ~ . - SOM_cluster, data = med_som)
+lm_som_coords_med <- (model$fitted.values - med_som$egfr_rate)^2
+
+# all clin + coords, high pats
+model <- lm(egfr_rate ~ . - SOM_cluster, data = high_som)
+lm_som_coords_high <- (model$fitted.values - high_som$egfr_rate)^2
+
+# PLOT
+
+plot_compare_models(linear_clin = lm_som_clin_all, linear_other = lm_som_clin_low, rf_clin = lm_som_coords_all, rf_other = lm_som_coords_low, description_other = "LOW group", predicting = paste0("EGFR Rate with Linear Models (LOW SOM group, n = ", length(lm_som_clin_low), ")"))
+
+plot_compare_models(linear_clin = lm_som_clin_all, linear_other = lm_som_clin_med, rf_clin = lm_som_coords_all, rf_other = lm_som_coords_med, description_other = "MED group", predicting = paste0("EGFR Rate with Linear Models (MED SOM group, n = ", length(lm_som_clin_med), ")"))
+
+plot_compare_models(linear_clin = lm_som_clin_all, linear_other = lm_som_clin_high, rf_clin = lm_som_coords_all, rf_other = lm_som_coords_high, description_other = "HIGH group", predicting = paste0("EGFR Rate with Linear Models (HIGH SOM group, n = ", length(lm_som_clin_high), ")"))
+
+```
+
+RF
+```{r echo = FALSE, message = FALSE}
+# ONLY CLIN
+
+# all clin, all pats
+model <- randomForest(egfr_rate ~ . - SOM_cluster - SOM_X - SOM_Y, data = som_df)
+rf_som_clin_all <- (model$predicted - som_df$egfr_rate)^2
+
+# all clin, low pats
+model <- randomForest(egfr_rate ~ . - SOM_cluster - SOM_X - SOM_Y, data = low_som)
+rf_som_clin_low <- (model$predicted - low_som$egfr_rate)^2
+
+# all clin, med pats
+model <- randomForest(egfr_rate ~ . - SOM_cluster - SOM_X - SOM_Y, data = med_som)
+rf_som_clin_med <- (model$predicted - med_som$egfr_rate)^2
+
+# all clin, high pats
+model <- randomForest(egfr_rate ~ . - SOM_cluster - SOM_X - SOM_Y, data = high_som)
+rf_som_clin_high <- (model$predicted - high_som$egfr_rate)^2
+
+# INCLUDE COORDS
+
+# all clin + coords, all pats
+model <- randomForest(egfr_rate ~ . - SOM_cluster, data = som_df)
+rf_som_coords_all <- (model$predicted - som_df$egfr_rate)^2
+
+# all clin + coords, low pats
+model <- randomForest(egfr_rate ~ . - SOM_cluster, data = low_som)
+rf_som_coords_low <- (model$predicted - low_som$egfr_rate)^2
+
+# all clin + coords, med pats
+model <- randomForest(egfr_rate ~ . - SOM_cluster, data = med_som)
+rf_som_coords_med <- (model$predicted - med_som$egfr_rate)^2
+
+# all clin + coords, high pats
+model <- randomForest(egfr_rate ~ . - SOM_cluster, data = high_som)
+rf_som_coords_high <- (model$predicted - high_som$egfr_rate)^2
+
+# PLOT
+
+plot_compare_models(linear_clin = rf_som_clin_all, linear_other = rf_som_clin_low, rf_clin = rf_som_coords_all, rf_other = rf_som_coords_low, description_other = "LOW group", predicting = paste0("EGFR Rate with RF Models (LOW SOM group, n = ", length(rf_som_clin_low), ")"))
+
+plot_compare_models(linear_clin = rf_som_clin_all, linear_other = rf_som_clin_med, rf_clin = rf_som_coords_all, rf_other = rf_som_coords_med, description_other = "MED group", predicting = paste0("EGFR Rate with RF Models (MED SOM group, n = ", length(rf_som_clin_med), ")"))
+
+plot_compare_models(linear_clin = rf_som_clin_all, linear_other = rf_som_clin_high, rf_clin = rf_som_coords_all, rf_other = rf_som_coords_high, description_other = "HIGH group", predicting = paste0("EGFR Rate with RF Models (HIGH SOM group, n = ", length(rf_som_clin_high), ")"))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

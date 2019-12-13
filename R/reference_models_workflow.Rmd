@@ -1,0 +1,213 @@
+---
+title: "Reference Model Workflow"
+output: word_document
+---
+
+Load data
+```{r echo = FALSE, message = FALSE}
+#untar <- read.csv("../data/zscore_untargeted.csv")
+clin <- read.csv("../data/partitioning.csv")
+names(clin)[1] <- "patients"
+#untarmet <- read.csv("../data/CRIC_clinical_creatinine_normalized_samplemetadata.csv", header = FALSE)
+
+#jing <- read.csv("../data/60 var selected by 8 models from lasso RF TB (models with both ions and cli).csv")
+#jing_ions <- as.numeric(unique(substring(jing$Ion, 5,15)))
+
+# save copy of original untargeted ions 
+#original_untar <- untar
+
+# only include V3Y0
+#untar <- untar[untar$visit == "V3Y0",]
+
+#pats <- untar$patientid 
+
+# include only jing ions
+#untar <- untar[,names(untar) %in% paste0("V", jing_ions)]
+
+# combine untargeted and clinical data
+#untar$patients <- pats
+#combined <- merge(untar, clin, by = "patients")
+
+
+# separate into groups, remove patient information
+#train1 <- combined[combined$group == 0,][-1]
+#train2 <- combined[combined$group == 1,][-1]
+#train3 <- combined[combined$group == 2,][-1]
+
+# metadata <- c("group", "rawdata.mu_egfr", "rawdata.sigma_egfr", "rawdata.r_group", "rawdata.v_group")
+
+#write.csv(train1, "../data/clin_and_untar_train1.csv", row.names = FALSE)
+#write.csv(train2, "../data/clin_and_untar_train2.csv", row.names = FALSE)
+#write.csv(train3, "../data/clin_and_untar_train3.csv", row.names = FALSE)
+
+#clin1 <- clin[clin$group == 0,][-1]
+#clin2 <- clin[clin$group == 1,][-1]
+#clin3 <- clin[clin$group == 2,][-1]
+
+#write.csv(clin1, "../data/clin_train1.csv", row.names = FALSE)
+#write.csv(clin2, "../data/clin_train2.csv", row.names = FALSE)
+#write.csv(clin3, "../data/clin_train3.csv", row.names = FALSE)
+
+clin1 <- read.csv("../data/clin_train1.csv")
+clin2 <- read.csv("../data/clin_train2.csv")
+clin3 <- read.csv("../data/clin_train3.csv")
+
+train1 <- read.csv("../data/clin_and_untar_train1.csv")
+train2 <- read.csv("../data/clin_and_untar_train2.csv")
+train3 <- read.csv("../data/clin_and_untar_train3.csv")
+
+pca_coords <- read.csv("../data/pca_coords.csv")
+pca_coords_t1 <- merge(clin[clin$group == 0,], pca_coords, by = "patients")[-1]
+pca_coords_t2 <- merge(clin[clin$group == 1,], pca_coords, by = "patients")[-1]
+pca_coords_t3 <- merge(clin[clin$group == 2,], pca_coords, by = "patients")[-1]
+
+tsne_coords <- read.csv("../data/tsne_coords.csv")
+tsne_coords_t1 <- merge(clin[clin$group == 0,], tsne_coords, by = "patients")[-1]
+tsne_coords_t2 <- merge(clin[clin$group == 1,], tsne_coords, by = "patients")[-1]
+tsne_coords_t3 <- merge(clin[clin$group == 2,], tsne_coords, by = "patients")[-1]
+
+som_coords <- read.csv("../data/som_coords.csv")
+som_coords_t1 <- merge(clin[clin$group == 0,], som_coords, by = "patients")[-1]
+som_coords_t2 <- merge(clin[clin$group == 1,], som_coords, by = "patients")[-1]
+som_coords_t3 <- merge(clin[clin$group == 2,], som_coords, by = "patients")[-1]
+
+
+```
+
+# Linear Models: Clinical and Ions
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+#  EGFR Rate with Clinical Variables
+lcr <- lm_rate_3xCV(clin1, clin2, clin3)
+
+# Predicting EGFR Volatility with Clinical Variables
+lcv <- lm_vol_3xCV(clin1, clin2, clin3)
+
+# Predicting EGFR Rate with Clinical Variables and Untargeted Ions
+lbr <- lm_rate_3xCV(train1, train2, train3)
+
+# Predicting EGFR Volatility with combical Variables and Untargeted Ions
+lbv <- lm_vol_3xCV(train1, train2, train3)
+
+```
+
+# Random Forest: Clinical and Ions
+```{r echo = FALSE, message = FALSE}
+
+#  EGFR Rate with Clinical Variables
+rfcr <- rf_rate_3xCV(clin1, clin2, clin3)
+
+# Predicting EGFR Volatility with Clinical Variables
+rfcv <- rf_vol_3xCV(clin1, clin2, clin3)
+
+# Predicting EGFR Rate with Clinical Variables and Untargeted Ions
+rfbr <- rf_rate_3xCV(train1, train2, train3)
+
+# Predicting EGFR Volatility with combical Variables and Untargeted Ions
+rfbv <- rf_vol_3xCV(train1, train2, train3)
+
+```
+
+# Plot Clin vs Clin and Ions
+```{r echo = FALSE, message = FALSE}
+plot_compare_models(linear_clin = lcr$res1, linear_other = lbr$res1, rf_clin = rfcr$res1, rf_other = rfbr$res1, description_other = "Ions", predicting = "EGFR Rate")
+plot_compare_models(linear_clin = lcv$res1, linear_other = lbv$res1, rf_clin = rfcv$res1, rf_other = rfbv$res1, description_other = "Ions", predicting = "EGFR Volatility")
+
+```
+
+# Clin vs Clin and PCA Coordinates
+```{r echo = FALSE, message = FALSE}
+
+# Linear: rate
+pca_lr <- lm_rate_3xCV(pca_coords_t1, pca_coords_t2, pca_coords_t3)
+
+# Linear: vol
+pca_lv <- lm_vol_3xCV(pca_coords_t1, pca_coords_t2, pca_coords_t3)
+
+# RF: rate
+pca_rfr <- rf_rate_3xCV(pca_coords_t1, pca_coords_t2, pca_coords_t3)
+
+# RF: vol
+pca_rfv <- rf_vol_3xCV(pca_coords_t1, pca_coords_t2, pca_coords_t3)
+
+# plot
+plot_compare_models(linear_clin = lcr$res1, linear_other = pca_lr$res1, rf_clin = rfcr$res1, rf_other = pca_rfr$res1, description_other = "Ions", predicting = "EGFR Rate")
+plot_compare_models(linear_clin = lcv$res1, linear_other = pca_lv$res1, rf_clin = rfcv$res1, rf_other = pca_lv$res1, description_other = "Ions", predicting = "EGFR Volatility")
+
+```
+
+# TSNE
+```{r echo = FALSE, message = FALSE}
+
+# Linear: rate
+tsne_lr <- lm_rate_3xCV(tsne_coords_t1, tsne_coords_t2, tsne_coords_t3)
+
+# Linear: vol
+tsne_lv <- lm_vol_3xCV(tsne_coords_t1, tsne_coords_t2, tsne_coords_t3)
+
+# RF: rate
+tsne_rfr <- rf_rate_3xCV(tsne_coords_t1, tsne_coords_t2, tsne_coords_t3)
+
+# RF: vol
+tsne_rfv <- rf_vol_3xCV(tsne_coords_t1, tsne_coords_t2, tsne_coords_t3)
+
+# plot
+plot_compare_models(linear_clin = lcr$res1, linear_other = tsne_lr$res1, rf_clin = rfcr$res1, rf_other = tsne_rfr$res1, description_other = "Ions", predicting = "EGFR Rate")
+plot_compare_models(linear_clin = lcv$res1, linear_other = tsne_lv$res1, rf_clin = rfcv$res1, rf_other = tsne_lv$res1, description_other = "Ions", predicting = "EGFR Volatility")
+
+```
+
+# SOM
+```{r echo = FALSE, message = FALSE}
+
+# Linear: rate
+som_lr <- lm_rate_3xCV(som_coords_t1, som_coords_t2, som_coords_t3)
+
+# Linear: vol
+som_lv <- lm_vol_3xCV(som_coords_t1, som_coords_t2, som_coords_t3)
+
+# RF: rate
+som_rfr <- rf_rate_3xCV(som_coords_t1, som_coords_t2, som_coords_t3)
+
+# RF: vol
+som_rfv <- rf_vol_3xCV(som_coords_t1, som_coords_t2, som_coords_t3)
+
+# plot
+plot_compare_models(linear_clin = lcr$res1, linear_other = som_lr$res1, rf_clin = rfcr$res1, rf_other = som_rfr$res1, description_other = "Ions", predicting = "EGFR Rate")
+plot_compare_models(linear_clin = lcv$res1, linear_other = som_lv$res1, rf_clin = rfcv$res1, rf_other = som_lv$res1, description_other = "Ions", predicting = "EGFR Volatility")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

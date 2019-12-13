@@ -1,0 +1,192 @@
+---
+title: "Reference Models"
+output: word_document
+---
+
+```{r echo=FALSE, message=FALSE}
+
+linear_model <- function(model, data, newdata, predict) {
+  if (predict == "rate") {
+    training_MSE <- mse(model$fitted.values, data$rawdata.mu_egfr)
+    pred <- predict(model, newdata = newdata)
+    testing_MSE <- mse(pred,newdata$rawdata.mu_egfr)
+    se <- (pred-newdata$rawdata.mu_egfr)^2
+  } else if (predict == "volatility") {
+    training_MSE <- mse(model$fitted.values, data$rawdata.sigma_egfr)
+    pred <- predict(model, newdata = newdata)
+    testing_MSE <- mse(pred,newdata$rawdata.sigma_egfr)
+    se <- (pred-newdata$rawdata.sigma_egfr)^2
+  }
+  return(se)
+}
+
+
+rf_model <- function(model, data, newdata, predict) {
+  if (predict == "rate") {
+    training_MSE <- mse(model$predicted, data$rawdata.mu_egfr)
+    pred <- predict(model, newdata = newdata)
+    testing_MSE <- mse(pred,newdata$rawdata.mu_egfr)
+    se <- (pred-newdata$rawdata.mu_egfr)^2
+  } else if (predict == "volatility") {
+    training_MSE <- mse(model$predicted, data$rawdata.sigma_egfr)
+    pred <- predict(model, newdata = newdata)
+    testing_MSE <- mse(pred,newdata$rawdata.sigma_egfr)
+    se <- (pred-newdata$rawdata.sigma_egfr)^2
+  }
+  return(se)
+}
+
+
+```
+
+```{r echo = FALSE, message = FALSE}
+lm_rate_3xCV <- function(set1, set2, set3){
+  
+  model <- lm(rawdata.mu_egfr ~ . - rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group - group, data = rbind(set1, set2) )
+  res1 <- linear_model(model, rbind(set1,set2), set3, predict = "rate")
+
+  model <- lm(rawdata.mu_egfr ~ . - rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group - group, data = rbind(set2, set3))
+  res2 <- linear_model(model, rbind(set2,set3), set1, predict = "rate")
+
+  model <- lm(rawdata.mu_egfr ~ . - rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group - group, data = rbind(set1, set3))
+  res3 <- linear_model(model, rbind(set1,set3), set2, predict = "rate")
+  
+  return(list("res1" = res1, "res2" = res2, "res3" = res3))
+}
+
+
+lm_vol_3xCV <- function(set1, set2, set3){
+  
+  model <- lm(rawdata.sigma_egfr ~ . - rawdata.mu_egfr - rawdata.r_group - rawdata.v_group - group, data = rbind(set1, set2))
+  res1 <- linear_model(model, rbind(set1,set2), set3, predict = "volatility")
+  
+  model <- lm(rawdata.sigma_egfr ~ . - rawdata.mu_egfr - rawdata.r_group - rawdata.v_group - group, data = rbind(set2, set3))
+  res2 <- linear_model(model, rbind(set2,set3), set1, predict = "volatility")
+  
+  model <- lm(rawdata.sigma_egfr ~ . - rawdata.mu_egfr - rawdata.r_group - rawdata.v_group - group, data = rbind(set1, set3))
+  res3 <- linear_model(model, rbind(set1,set3), set2, predict = "volatility")
+  
+  return(list("res1" = res1, "res2" = res2, "res3" = res3))
+}
+
+rf_rate_3xCV <- function(set1, set2, set3){
+  
+  rf <- randomForest(rawdata.mu_egfr ~ . - rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group -group, data = rbind(set1,set2), importance = TRUE, na.action = "na.exclude")
+  res1 <- rf_model(rf, rbind(set1,set2), set3, predict = "rate")
+  
+  rf <- randomForest(rawdata.mu_egfr ~ . - rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group -group, data = rbind(set2,set3), importance = TRUE, na.action = "na.exclude")
+  res2 <- rf_model(rf, rbind(set2,set3), set1, predict = "rate")
+  
+  rf <- randomForest(rawdata.mu_egfr ~ . - rawdata.sigma_egfr - rawdata.r_group - rawdata.v_group -group, data = rbind(set1,set3), importance = TRUE, na.action = "na.exclude")
+  res3 <- rf_model(rf, rbind(set1,set3), set2, predict = "rate")
+  
+  return(list("res1" = res1, "res2" = res2, "res3" = res3))
+}
+
+
+rf_vol_3xCV <- function(set1, set2, set3){
+  
+  rf <- randomForest(rawdata.sigma_egfr ~ . - rawdata.mu_egfr - rawdata.r_group - rawdata.v_group -group, data = rbind(set1,set2), importance = TRUE, na.action = "na.exclude")
+  res1 <- rf_model(rf, rbind(set1,set2), set3, predict = "volatility")
+  
+  rf <- randomForest(rawdata.sigma_egfr ~ . - rawdata.mu_egfr - rawdata.r_group - rawdata.v_group -group, data = rbind(set2,set3), importance = TRUE, na.action = "na.exclude")
+  res2 <- rf_model(rf, rbind(set2,set3), set1, predict = "volatility")
+  
+  rf <- randomForest(rawdata.sigma_egfr ~ . - rawdata.mu_egfr - rawdata.r_group - rawdata.v_group -group, data = rbind(set1,set3), importance = TRUE, na.action = "na.exclude")
+  res3 <- rf_model(rf, rbind(set1,set3), set2, predict = "volatility")
+  
+  return(list("res1" = res1, "res2" = res2, "res3" = res3))
+}
+
+```
+
+
+
+
+# Plot Results
+```{r echo = FALSE, message = FALSE}
+
+plot_3xCV <- function(errors, description) {
+  boxplot(errors$res1, errors$res2, errors$res3, outline = FALSE)
+  title(paste0(description, ", 3x Cross Val."))
+}
+
+```
+
+
+```{r echo = FALSE, message = FALSE}
+
+#plot_3xCV(lcr, "Linear model for Rate with Clinical")
+#plot_3xCV(lcv, "Linear model for Volatility with Clinical")
+#plot_3xCV(lbr, "Linear model for Rate with Clinical and Ions")
+#plot_3xCV(lbv, "Linear model for Volatility with Clinical and Ions")
+#plot_3xCV(rfcr, "Random Forest model for Rate with Clinical")
+#plot_3xCV(rfcr, "Random Forest model for Volatility with Clinical")
+#plot_3xCV(rfbr, "Random Forest model for Rate with Clinical and Ions")
+#plot_3xCV(rfbr, "Random Forest model for Volatility with Clinical and Ions")
+
+
+```
+
+
+
+Plots comparing models (using ggplot and with p vals comparing means, first rep from cross val)
+```{r echo = FALSE, message = FALSE}
+library(ggplot2)
+library(ggpubr)
+
+plot_compare_models <- function(linear_clin, linear_other, rf_clin, rf_other, description_other, predicting){
+  
+  combined_data <- data.frame("model" = c(rep("Linear: Clin", length(linear_clin)),
+                                    rep(paste0("Linear: Clin and ", description_other), length(linear_other)),
+                                    rep("RF: Clin", length(rf_clin)),
+                                    rep(paste0("RF: Clin and ", description_other), length(rf_other))),
+                        "error" = c(linear_clin, linear_other, rf_clin, rf_other)
+  )
+  
+  combined_data$model <- factor(combined_data$model, levels=c("Linear: Clin", paste0("Linear: Clin and ", description_other), "RF: Clin", paste0("RF: Clin and ", description_other)))
+  compare_means(error~model, data = combined_data)
+  my_comparisons <- list(c("Linear: Clin", paste0("Linear: Clin and ", description_other)), c("RF: Clin", paste0("RF: Clin and ", description_other)))
+ 
+  ggplot(combined_data, aes(x = model, y = error))+ 
+    geom_boxplot(outlier.shape = NA) +
+    stat_compare_means(comparisons = my_comparisons, method = "t.test", label.y = 0.02, tip.length = 0.001) + 
+    ylim(0, 0.025)+
+    ggtitle(paste0("MSE for Models Predicting ", predicting))
+
+}
+
+```
+  
+
+Table of MSEs (first rep from cross val)
+```{r echo = FALSE, message = FALSE}
+#mse <- data.frame("Linear with Clinical" = c(round(mean(lcr1), digits = 3), round(mean(lcv1), digits = 3)),
+#                  "Linear with Clinical and Ions" = c(round(mean(lbr1), digits = 3), round(mean(lbv1), digits = 3)),
+#                  "RF with Clinical" = c(round(mean(rfcr1), digits = 3), round(mean(rfcv1), digits = 3)),
+#                  "RF with Clinical and Ions" = c(round(mean(rfbr1), digits = 3), round(mean(rfbv1), digits = 3)))
+#rownames(mse) <- c("Rate", "Volatility")
+#kable(mse)
+
+#write.csv(mse, "../data/reference_model_mses.csv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

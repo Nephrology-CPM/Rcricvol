@@ -1,0 +1,144 @@
+---
+title: "consistency"
+output: word_document
+---
+
+```{r echo = FALSE, message = FALSE}
+data <- read.csv("../data/clustering_train_summary.csv")
+
+```
+
+What is the probability that duplicated samples are not found in the same cluster?
+```{r echo = FALSE, message = FALSE}
+
+find_prob_cluster_dups <- function(method, clustering_summary) {
+  df <- data.frame("pid" = clustering_summary$patients, "time" = as.integer(substring(clustering_summary$visit,4,5)), "cluster" = clustering_summary[grep(paste0(method, "_cluster"), names(clustering_summary))])
+  mismatch <- c()
+  match <- c()
+  for (year in unique(df$time)) {
+    df2 <- df[df$time == year,]
+    for (pat in unique(df2$pid)) {
+      df3 <- df2[df2$pid == pat,]
+      if (length(unique(df3[,3])) > 1) {mismatch <- c(mismatch, pat)}
+      else {match <- c(match, pat)}
+    }
+  }
+  print(paste0(method, ": ", round(length(mismatch)/(length(mismatch) + length(match)), digits = 3)))
+  return(mismatch)
+}
+
+pca_mismatch <- find_prob_cluster_dups("PCA", data)
+tsne_mismatch <- find_prob_cluster_dups("TSNE", data)
+som_mismatch <- find_prob_cluster_dups("SOM", data)
+
+```
+
+What is the probability that a patient stays in the cluster in which they started?
+```{r echo = FALSE, message = FALSE}
+
+find_prob_of_staying_in_cluster <- function(method, clustering_summary, mismatched) {
+  
+  clustering_summary <- clustering_summary[!clustering_summary$patients %in% mismatched,]
+  
+  df <- data.frame("pid" = clustering_summary$patients, "time" = as.integer(substring(clustering_summary$visit,4,5)), "cluster" = clustering_summary[grep(paste0(method, "_cluster"), names(clustering_summary))])
+  names(df)[3] <- "cluster"
+  df <- df[!duplicated(df),]
+  
+  pids_with_baseline <- df[df$time == 0,]$pid
+  df <- df[df$pid %in% pids_with_baseline,]
+  
+  res <- data.frame("patient" = unique(df$pid), "y1" = 0, "y2" = 0, "y3" = 0)
+  
+  for (pid in 1:nrow(res)) {
+    pdf <- df[df$pid == res$patient[pid],]
+    start <- pdf[pdf$time == 0,]$cluster
+    for (x in c(1,2,3)) {
+      if (x %in% pdf$time) {res[pid,(x+1)] <- (pdf[pdf$time == x,]$cluster == start)} 
+      else {res[pid, (x+1)] <- NA}
+    }
+  }
+  
+  rownames(res) <- res[,1]
+  res <- res[-1]
+  
+  print(paste0(method, " probability of staying in cluster: ", round(sum(res, na.rm = TRUE)/sum(!is.na(res)), digits = 3)))
+  
+  print("Number of years in starting cluster and Number of patients")
+  kable(table(unlist(rowSums(res, na.rm = TRUE))))
+  
+  print(paste0("At year 1, ", sum(res$y1, na.rm = TRUE), " patients are in the same cluster as they started in (n = ", sum(!is.na(res$y1)), ")"))
+  print(paste0("At year 2, ", sum(res$y2, na.rm = TRUE), " patients are in the same cluster as they started in (n = ", sum(!is.na(res$y2)), ")"))
+  print(paste0("At year 3, ", sum(res$y3, na.rm = TRUE), " patients are in the same cluster as they started in (n = ", sum(!is.na(res$y3)), ")"))
+  
+  return(sum(res, na.rm = TRUE)/sum(!is.na(res)))
+}
+
+
+pca_stayincluster <- find_prob_of_staying_in_cluster(method = "PCA", clustering_summary = data, mismatched = pca_mismatch)
+tsne_stayincluster <- find_prob_of_staying_in_cluster(method = "TSNE", clustering_summary = data, mismatched = tsne_mismatch)
+som_stayincluster <- find_prob_of_staying_in_cluster(method = "SOM", clustering_summary = data, mismatched = som_mismatch)
+
+```
+
+Transition matrix
+normalized by dividing by row sums 
+```{r echo = FALSE, message = FALSE}
+
+make_transition_matrix <- function(method, clustering_summary, mismatched){
+  
+  clusters <- unlist(unique(clustering_summary[grep(paste0(method, "_cluster"), names(clustering_summary))]))
+  clustering_summary <- clustering_summary[!clustering_summary$patients %in% mismatched,]
+  
+  df <- data.frame("pid" = clustering_summary$patients, "time" = as.integer(substring(clustering_summary$visit,4,5)), "cluster" = clustering_summary[grep(paste0(method, "_cluster"), names(clustering_summary))])
+  names(df)[3] <- "cluster"
+  df <- df[!duplicated(df),]
+  
+  
+  tm <- matrix(nrow = length(clusters), ncol = length(clusters), 0)
+  rownames(tm) <- sort(clusters)
+  colnames(tm) <- sort(clusters)
+  
+  for (pid in unique(df$pid)) {
+    pdf <- df[df$pid == pid,]
+    pdf <- pdf[order(pdf$time),]
+    for (row in 1:nrow(pdf)) {
+      from <- pdf$cluster[row]
+      to <- pdf$cluster[row + 1]
+      tm[from, to] <- tm[from, to] + 1
+    }
+  }
+  
+  for (r in 1:nrow(tm)) {
+    tm[r,] <- round((tm[r,] / sum(tm[r,])), digits = 3)
+  }
+  
+  return(tm) 
+}
+
+pca_tm <- make_transition_matrix("PCA", data, pca_mismatch) 
+tsne_tm <- make_transition_matrix("TSNE", data, tsne_mismatch)
+som_tm <- make_transition_matrix("SOM", data, som_mismatch)
+
+write.csv(pca_tm, "../data/pca_transition_matrix.csv", row.names = FALSE)
+write.csv(tsne_tm, "../data/tsne_transition_matrix.csv", row.names = FALSE)
+write.csv(som_tm, "../data/som_transition_matrix.csv", row.names = FALSE)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

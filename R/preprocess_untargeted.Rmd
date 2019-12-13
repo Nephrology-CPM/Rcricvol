@@ -15,8 +15,9 @@ log_untar <- log(untar)
 
 ```
 
-#Screen ions to get to about ~5000. use coefficient of variation (used to make selected zscored ions)
+
 ```{r echo = FALSE, message = FALSE}
+#Screen ions to get to about ~5000. use coefficient of variation (used to make selected zscored ions)
 #test <- data.frame(apply(log_original_untar, MARGIN = 2, function(x){sd(x)/mean(x)}))
 #names(test) <- c("cov")
 
@@ -58,7 +59,7 @@ hist(original_untar[,1])
 ```
 After:
 ```{r echo = FALSE, message = FALSE}
-hist(zscore_untar[,3])
+hist(zscore_untar[,4])
 ```
 
 ```{r echo = FALSE, message = FALSE}

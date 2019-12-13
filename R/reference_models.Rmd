@@ -3,58 +3,43 @@ title: "Reference Models"
 output: word_document
 ---
 
+# random forest and linear models comparing using clinical features vs clinical features and jings ions to predict egfr rate and volatility
+# random forest and linear models comparing using clinical features vs clinical features and coordinates from dimension reduction methods to predict egfr rate and volatility
+
 Load data
 ```{r Load Data, echo=FALSE, message=FALSE}
-#untar <- read.csv("../data/zscore_untargeted.csv")
+untar <- read.csv("../data/zscore_untargeted_annotatedions.csv")
 clin <- read.csv("../data/partitioning.csv")
 names(clin)[1] <- "patients"
-#untarmet <- read.csv("../data/CRIC_clinical_creatinine_normalized_samplemetadata.csv", header = FALSE)
+untarmet <- read.csv("../data/CRIC_clinical_creatinine_normalized_samplemetadata.csv", header = FALSE)
 
-#jing <- read.csv("../data/60 var selected by 8 models from lasso RF TB (models with both ions and cli).csv")
-#jing_ions <- as.numeric(unique(substring(jing$Ion, 5,15)))
+jing <- read.csv("../data/60 var selected by 8 models from lasso RF TB (models with both ions and cli).csv")
+jing_ions <- as.numeric(unique(substring(jing$Ion, 5,15)))
 
 # save copy of original untargeted ions 
-#original_untar <- untar
+original_untar <- untar
 
 # only include V3Y0
-#untar <- untar[untar$visit == "V3Y0",]
+untar <- untar[untar$visit == "V3Y0",]
 
-#pats <- untar$patientid
+pats <- untar$patientid
 
 # include only jing ions
-#untar <- untar[,names(untar) %in% paste0("V", jing_ions)]
+untar <- untar[,names(untar) %in% paste0("V", jing_ions)]
 
 # combine untargeted and clinical data
-#untar$patients <- pats
-#combined <- merge(untar, clin, by = "patients")
+untar$patients <- pats
+combined <- merge(untar, clin, by = "patients")
 
 
 # separate into groups, remove patient information
-#train1 <- combined[combined$group == 0,][-1]
-#train2 <- combined[combined$group == 1,][-1]
-#train3 <- combined[combined$group == 2,][-1]
+train1 <- combined[combined$group == 0,][-1]
+train2 <- combined[combined$group == 1,][-1]
+train3 <- combined[combined$group == 2,][-1]
 
-# metadata <- c("group", "rawdata.mu_egfr", "rawdata.sigma_egfr", "rawdata.r_group", "rawdata.v_group")
-
-#write.csv(train1, "../data/clin_and_untar_train1.csv", row.names = FALSE)
-#write.csv(train2, "../data/clin_and_untar_train2.csv", row.names = FALSE)
-#write.csv(train3, "../data/clin_and_untar_train3.csv", row.names = FALSE)
-
-#clin1 <- clin[clin$group == 0,][-1]
-#clin2 <- clin[clin$group == 1,][-1]
-#clin3 <- clin[clin$group == 2,][-1]
-
-#write.csv(clin1, "../data/clin_train1.csv", row.names = FALSE)
-#write.csv(clin2, "../data/clin_train2.csv", row.names = FALSE)
-#write.csv(clin3, "../data/clin_train3.csv", row.names = FALSE)
-
-#train1 <- read.csv("../data/clin_and_untar_train1.csv")
-#train2 <- read.csv("../data/clin_and_untar_train2.csv")
-#train3 <- read.csv("../data/clin_and_untar_train3.csv")
-
-#clin1 <- read.csv("../data/clin_train1.csv")
-#clin2 <- read.csv("../data/clin_train2.csv")
-#clin3 <- read.csv("../data/clin_train3.csv")
+clin1 <- clin[clin$group == 0,][-1]
+clin2 <- clin[clin$group == 1,][-1]
+clin3 <- clin[clin$group == 2,][-1]
 
 ```
 
@@ -90,27 +75,11 @@ rf_model <- function(model, data, newdata, predict) {
     training_MSE <- mse(model$predicted, data$rawdata.mu_egfr)
     pred <- predict(model, newdata = newdata)
     testing_MSE <- mse(pred,newdata$rawdata.mu_egfr)
-    #t <- roc(predictor = as.numeric(model$predicted), as.factor(as.numeric(data$rawdata.r_group <= 2)), plot = TRUE, ci = TRUE)
-    #print(paste0("training MSE: ", training_MSE))
-    #t$auc
-    #t$ci
-    #v <- roc(predictor = as.numeric(pred), as.factor(as.numeric(newdata$rawdata.r_group <= 2)), plot = TRUE, ci = TRUE)
-    #print(paste0("testing MSE: ", testing_MSE))
-    #v$auc
-    #v$ci
     se <- (pred-newdata$rawdata.mu_egfr)^2
   } else if (predict == "volatility") {
     training_MSE <- mse(model$predicted, data$rawdata.sigma_egfr)
     pred <- predict(model, newdata = newdata)
     testing_MSE <- mse(pred,newdata$rawdata.sigma_egfr)
-    #t <- roc(predictor = as.numeric(model$predicted), as.factor(as.numeric(data$rawdata.v_group <= 2)), plot = TRUE, ci = TRUE)
-    #print(paste0("training MSE: ", training_MSE))
-    #t$auc
-    #t$ci
-    #v <- roc(predictor = as.numeric(pred), as.factor(as.numeric(newdata$rawdata.v_group <= 2)), plot = TRUE, ci = TRUE)
-    #print(paste0("testing MSE: ", testing_MSE))
-    #v$auc
-    #v$ci
     se <- (pred-newdata$rawdata.sigma_egfr)^2
   }
   return(se)
@@ -245,7 +214,7 @@ df <- data.frame("lbr1" = lbr1,
                  "rfbv3" = rfbv3
                  )
 
-write.csv(df, "../data/reference_model_df.csv")
+#write.csv(df, "../data/reference_model_df.csv")
 ```
 
 
@@ -341,7 +310,7 @@ write.csv(mse, "../data/reference_model_mses.csv")
 # PCA
 Load coordinate data
 ```{r echo = FALSE, message = FALSE}
-pca_coords <- read.csv("../data/pca_coords.csv")
+pca_coords <- read.csv("../data/pca_train_coords.csv")
 
 pca_coords_t1 <- merge(clin[clin$group == 0,], pca_coords, by = "patients")[-1]
 pca_coords_t2 <- merge(clin[clin$group == 1,], pca_coords, by = "patients")[-1]
@@ -449,7 +418,7 @@ ggplot(pca_vol_data, aes(x = model, y = error))+
 # tSNE
 Load coordinate data
 ```{r echo = FALSE, message = FALSE}
-tsne_coords <- read.csv("../data/tsne_coords.csv")
+tsne_coords <- read.csv("../data/tsne_train_coords.csv")
 
 tsne_coords_t1 <- merge(clin[clin$group == 0,], tsne_coords, by = "patients")[-1]
 tsne_coords_t2 <- merge(clin[clin$group == 1,], tsne_coords, by = "patients")[-1]
@@ -558,7 +527,7 @@ ggplot(tsne_vol_data, aes(x = model, y = error))+
 # SOM
 Load coordinate data
 ```{r echo = FALSE, message = FALSE}
-som_coords <- read.csv("../data/som_coords.csv")
+som_coords <- read.csv("../data/som_train_coords.csv")
 
 som_coords_t1 <- merge(clin[clin$group == 0,], som_coords, by = "patients")[-1]
 som_coords_t2 <- merge(clin[clin$group == 1,], som_coords, by = "patients")[-1]
