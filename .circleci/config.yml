@@ -3,7 +3,7 @@ jobs:
   build:
     working_directory: ~/main
     docker:
-      - image: dmontemayor/circleci-r:latest
+      - image: dmontemayor/circleci-r:0.1
     steps:
       - checkout
       - restore_cache:
