@@ -1,0 +1,78 @@
+---
+title: "Validate Partitioning by Random Forest"
+author: "Daniel Montemayor"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  word_document:
+    toc: yes
+    toc_depth: 2
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    code_folding: hide
+subtitle:
+editor_options: 
+  chunk_output_type: console
+---
+![Center for Renal Precision Medicine](https://dmontemayor.github.io/assets/Long_SOM/horizontal/JPG/UTHSA_Long-SOM_H_CMYK.jpg)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objectives
++ Create RF model to predict partition based on all clinical variables and outcomes eGFR rate and volatility.
++ Apply model to out balaced partitioning and calculate error to predict partition label.
++ Get model error distribution based on 1000 realizations of random partitioning.
++ Demonstrate with our balanced partitioning it is significantly harder to predict partition labels than from a random partitioning.
+
+## Requirements and Konstants
+```{r}
+#random seed
+set.seed(44701)
+
+#konstants
+
+#libraries
+if(!require("randomForest")){
+  install.packages("randomForest")
+}
+library(randomForest)
+```
+
+## Download data
+```{r}
+data <- read.csv("../data/partitioned_withgroups.csv", header=TRUE, stringsAsFactors=FALSE)
+#remove patiend id, rgroup, and vgroup labels
+drops <- c("patients", "rawdata.r_group", "rawdata.v_group")
+data <- data[,!names(data) %in%drops]
+```
+
+## Calculate classification error for balanced partition
+```{r}
+rf_balanced <- randomForest(data[,names(data)!="group"], y=as.factor(data$group), na.action = "na.exclude")
+classerr_balanced <-unlist(rf_balanced$confusion[,6])
+classerr_balanced
+mean(classerr_balanced)
+```
+
+## Calculate classification error distribution for random partitioning
+```{r}
+classerr <- c()
+for (i in 1:500){
+  #shuffle group labels
+  randgroup <- as.factor(sample(data$group))
+  rf <- randomForest(data[,names(data)!="group"], y=randgroup, na.action = "na.exclude")
+  classerr <- append(classerr, mean(unlist(rf$confusion[,6])))
+}
+```
+
+```{r}
+t.test(classerr,mean(classerr_balanced))
+
+```
