@@ -13,6 +13,7 @@ jobs:
             - deps1-
       - run:
           command: |
+            R -e "install.packages('devtools',repos='http://cran.us.r-project.org')"
             R -e 'devtools::install_deps(dependencies = TRUE)'
       - save_cache:
           key: deps1-{{ .Branch }}-{{ checksum "DESCRIPTION" }}
