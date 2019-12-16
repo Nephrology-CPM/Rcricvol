@@ -8,15 +8,15 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - deps1-{{ .Branch }}-{{ checksum "DESCRIPTION" }}
-            - deps1-{{ .Branch }}
-            - deps1-
+            - deps2-{{ .Branch }}-{{ checksum "DESCRIPTION" }}
+            - deps2-{{ .Branch }}
+            - deps2-
       - run:
           command: |
             R -e "install.packages('devtools',repos='http://cran.us.r-project.org')"
             R -e 'devtools::install_deps(dependencies = TRUE)'
       - save_cache:
-          key: deps1-{{ .Branch }}-{{ checksum "DESCRIPTION" }}
+          key: deps2-{{ .Branch }}-{{ checksum "DESCRIPTION" }}
           paths:
             - "/usr/local/lib/R/site-library"
       - run:

@@ -7,7 +7,7 @@ Authors@R: person("Daniel", "Montemayor", email = "montemayord2@uthscsa.edu",
 Maintainer: Daniel Montemayor <montemayord2@uthscsa.edu>
 Author: Daniel Montemayor <montemayord2@uthscsa.edu>
 Description: Tools for uploading CRIC data, generating tables and figures,
-    treating missing values, transformations, and partitioning sub-populations.
+    treating missing values, transformations, and partitioning sub populations.
 Depends: R (>= 3.1.0)
 License: file LICENSE
 LazyData: true
