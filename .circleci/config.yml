@@ -23,7 +23,7 @@ jobs:
             - "/usr/local/lib/R/site-library"
       - run:
           command: |
-            R CMD check crpmcric
+            R CMD check crpmcric --no-manual
             #R -e 'devtools::check()'
       - store_artifacts:
           path: man/

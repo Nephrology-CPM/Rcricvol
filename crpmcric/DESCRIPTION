@@ -5,7 +5,7 @@ Version: 0.1.0
 Author: Daniel Montemayor <montemayord2@uthscsa.edu>
 Maintainer: Daniel Montemayor <montemayord2@uthscsa.edu>
 Description: Tools for uploading CRIC data, generating tables and figures,
-    treating missing values, transformations, and partitioning sub populations
+    treating missing values, transformations, and partitioning sub populations.
 License: file LICENSE
 Encoding: UTF-8
 LazyData: true
