@@ -16,15 +16,17 @@ jobs:
             apt-get update && apt-get install -y libcurl4-openssl-dev libssl-dev libgit2-dev libssh2-1-dev libxml2-dev
             R -e "install.packages('devtools',repos='http://cran.us.r-project.org')"
             R -e 'devtools::install_deps(dependencies = TRUE)'
-            R CMD build crpmcric
+            R -e 'devtools::build(crpmcirc)'
+            #R CMD build crpmcric
+            #R CMD INSTALL crpmcirc_0.1.tar.gz
       - save_cache:
           key: deps2-{{ .Branch }}-{{ checksum "DESCRIPTION" }}
           paths:
             - "/usr/local/lib/R/site-library"
       - run:
           command: |
-            R CMD check crpmcric --no-manual
-            #R -e 'devtools::check()'
+            #R CMD check crpmcric --no-manual
+            R -e 'devtools::check(crpmcric)'
       - store_artifacts:
           path: man/
           destination: man
