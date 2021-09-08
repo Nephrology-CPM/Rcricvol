@@ -1,3 +1,17 @@
+# RStudio files
 ^.*\.Rproj$
+
+# temporary RStudio files
 ^\.Rproj\.user$
+
+#Readme file
+README.md
+
+# generated data files
 ^data/.+$
+
+# Continuous integration files
+^.circleci
+
+# misc
+.DS_Store

@@ -3,7 +3,7 @@ jobs:
   build:
     working_directory: ~/main
     docker:
-      - image: r-base:latest #dmontemayor/circleci-r:0.1
+      - image: r-base:latest
     steps:
       - checkout
       - restore_cache:
@@ -16,13 +16,19 @@ jobs:
             apt-get update && apt-get install -y libcurl4-openssl-dev libssl-dev libgit2-dev libssh2-1-dev libxml2-dev
             R -e "install.packages('devtools',repos='http://cran.us.r-project.org')"
             R -e 'devtools::install_deps(dependencies = TRUE)'
+            R -e "devtools::install_github('dmontemayor/crpmr')"
+            #R -e 'devtools::build()'
+            #R CMD build crpmcric
+            #R CMD INSTALL crpmcirc_0.1.tar.gz
       - save_cache:
           key: deps2-{{ .Branch }}-{{ checksum "DESCRIPTION" }}
           paths:
             - "/usr/local/lib/R/site-library"
       - run:
           command: |
-            R -e 'devtools::check()'
+            R -e 'devtools::test()'
+            #R CMD check crpmcric --no-manual
+            #R -e 'devtools::check()'
       - store_artifacts:
           path: man/
           destination: man

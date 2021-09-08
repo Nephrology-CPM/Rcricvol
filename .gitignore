@@ -2,7 +2,7 @@
 .Ruserdata
 
 # Data folder
-data
+data*
 docs
 
 # History files
@@ -22,6 +22,9 @@ docs
 /*.Rcheck/
 
 # RStudio files
+*.Rproj
+
+# temporary RStudio files
 .Rproj.user/
 
 # produced vignettes
